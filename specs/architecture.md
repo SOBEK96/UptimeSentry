@@ -93,9 +93,10 @@ Once expired, anyone may call `release_expired_policy`, which returns the backin
 ```
 file_incident ──► CLAIM_PENDING ──► confirm_outage × n  (samples in [confirm_after, +2h], ≥10 min apart)
      (probe DOWN,            │
-      LLM triage)            ├─ no appeal: after the 24h deadline and the window close ─► claim_payout
+      advisory LLM triage)            ├─ no appeal: after the 24h deadline and the window close ─► claim_payout
                              │      DOWN majority of ≥3 samples ─► PAID
-                             │      otherwise ─────────────────► RECOVERED (escrow back to the pool)
+                             │      ≥3 samples, no DOWN majority ► RECOVERED (bond to the pool)
+                             │      fewer than 3 samples ────────► INDETERMINATE_INSUFFICIENT_SAMPLES (bond refunded)
                              │
                              └─ file_appeal ─► UNDER_APPEAL ─(window closed)─► resolve_appeal
                                     DOWN majority of ≥3 samples ─► CONFIRMED ─► claim_payout ─► PAID
@@ -106,7 +107,7 @@ file_incident ──► CLAIM_PENDING ──► confirm_outage × n  (samples in
 | --- | --- | --- |
 | `file_incident` | value > 0 (`ERR_ZERO_BOND`); evidence bound (§2.2); policy `ACTIVE` and unexpired; reporter ≠ provider; bond ≥ required (§5.1); **consensus probe reports failure**, else `ERR_NO_OUTAGE_OBSERVED` | Claim `CLAIM_PENDING`. `payout = policy.coverage` moves from committed capital to escrow. Policy becomes `CLAIM_OPEN`. `challenge_deadline = filed_at + 24 h`, `confirm_after = filed_at + max_downtime_s` |
 | `confirm_outage` | claim `CLAIM_PENDING` or `UNDER_APPEAL`; `confirm_after ≤ now ≤ confirm_after + 2 h`; ≥ 600 s since the last sample; probe not INDETERMINATE (`ERR_RATE_LIMITED`) | Records one consensus sample (`samples_total`, `samples_down`) |
-| `claim_payout` on `CLAIM_PENDING` | `now ≥ challenge_deadline` (`ERR_CHALLENGE_WINDOW_OPEN`); confirmation window closed (`ERR_OUTAGE_UNCONFIRMED`) | Sustained: payout to the holder, reporter bond credited back, claim `PAID`. Not sustained: claim `RECOVERED`, escrow returned, reporter bond forfeited to the provider's pool |
+| `claim_payout` on `CLAIM_PENDING` | `now ≥ challenge_deadline` (`ERR_CHALLENGE_WINDOW_OPEN`); confirmation window closed (`ERR_OUTAGE_UNCONFIRMED`) | Sustained (≥ 3 samples, DOWN majority): payout to the holder, reporter bond credited back, claim `PAID`. Demonstrated recovery (≥ 3 samples, no DOWN majority): claim `RECOVERED`, escrow returned, reporter bond forfeited to the provider's pool. Fewer than 3 samples: claim `INDETERMINATE_INSUFFICIENT_SAMPLES`, escrow returned, reporter bond **refunded** |
 | `file_appeal` | value > 0; claim `CLAIM_PENDING`; `now < challenge_deadline`; appellant ∉ {reporter, holder}; bond ≥ required (§5.2) | Claim `UNDER_APPEAL` |
 | `resolve_appeal` | claim `UNDER_APPEAL`; confirmation window closed (`ERR_ADJUDICATION_NOT_READY`) | The recorded samples decide `CONFIRMED` or `DISMISSED` (§4). No probe runs |
 | `claim_payout` on `CONFIRMED` | none | Payout is transferred to the holder and the claim becomes `PAID` |
@@ -123,12 +124,12 @@ The filing probe proves the target is failing at `filed_at`. That alone never pa
 - **Sampling is open to anyone:** the holder, reporter, provider or any watchdog can call `confirm_outage`.
 - **Rate-limited samples don't count:** a 429/403 answer is refused rather than recorded. A provider that serves 429/403 to validators for the whole window starves the claim of samples, and it closes as recovered. That is the price of not letting rate limits prove outages. See §9.
 
-**LLM triage.** Filing runs `gl.nondet.exec_prompt` on the contract-observed failure code and the reporter's `failure_trace`, which is sanitised and delimited as untrusted data. Validators must agree on the category.
+**Advisory LLM triage.** Filing runs `gl.nondet.exec_prompt` on two inputs: the contract-observed failure code, and the reporter's `failure_trace`, sanitised and delimited as untrusted data.
 
-- **What it can do:** `CLIENT_SIDE_ARTIFACT` rejects the filing (`ERR_CLIENT_SIDE_ARTIFACT`). `UPSTREAM_OUTAGE` and `INCONCLUSIVE` proceed, with the verdict and rationale stored on the claim and included in `evidence_hash`.
-- **Why it's safe:** the model can only reject a reporter's own self-described problem. It never creates or enlarges a payout.
-- **Why the provider can't steer it:** the endpoint's response body is provider-controlled and is never sent to the model, so a provider cannot inject instructions that block claims against itself.
-- **Parsing:** the model is read as text and the JSON object is extracted from it. An unparseable answer reverts the filing (`ERR_TRIAGE_UNAVAILABLE`).
+- **Verdicts:** `ADVISORY_INFRASTRUCTURE_OUTAGE`, `ADVISORY_CLIENT_ARTIFACT` or `ADVISORY_INCONCLUSIVE`. The verdict and a short `triage_notes` summary (≤ 280 chars) are stored on the claim and included in `evidence_hash`, as expert evidence for appeals and dashboards.
+- **Never a veto.** Validators have already agreed the target is DOWN, and the model cannot overrule that objective observation. An unusable or failed model call is recorded as an abstention (`ADVISORY_INCONCLUSIVE`, "Triage unavailable…"), so the model can never block a filing.
+- **Consensus rule: the leader may abstain but not contradict.** A validator accepts the leader's verdict when the categories match, when the leader abstained, or when its own model cannot form an opinion. A stored category is therefore one that no validator which reached an opinion disputed.
+- **What the model never sees:** the endpoint's response body and headers. They are provider-controlled, so a provider cannot steer the evidence recorded against it.
 
 Pinned by `test_unchallenged_claim_pays_after_window`, `test_resolution_waits_for_downtime_window`, `test_legitimate_claim_settlement`, `test_fraudulent_claim_slashing`, `test_one_open_claim_per_policy_and_expiry`, and `test_outage_claim_escrows_and_locks_under_appeal` (integration).
 
@@ -136,7 +137,13 @@ Pinned by `test_unchallenged_claim_pays_after_window`, `test_resolution_waits_fo
 
 - **Where the escrow sits:** from filing until settlement, the payout is held in `total_escrow`, outside both the provider's free and committed capital. The provider cannot withdraw it.
 - **Locked while under appeal:** `claim_payout` on an `UNDER_APPEAL` claim raises exactly `ERR_PAYOUT_LOCKED: funds preserved until appeal resolution`, for every caller and at every time. That includes after the original challenge deadline, because the lock depends only on the state.
-- **Frozen capital:** withdrawals are two-step. `request_underwriting_withdrawal` queues an amount. `execute_underwriting_withdrawal` succeeds only after `WITHDRAWAL_DELAY` (24 h), and only with no claim against the provider in `CLAIM_PENDING` or `UNDER_APPEAL` (`ERR_OPEN_CLAIMS`). Queued capital stays in free capital, slashable, until it leaves. If a slash leaves less than the queued amount, execution fails (`ERR_INSUFFICIENT_FREE_CAPITAL`). A provider therefore cannot drain the slashing base as an outage starts.
+- **Frozen capital:** withdrawals are two-step, and execution has four gates:
+  1. `request_underwriting_withdrawal` queues an amount. `execute_underwriting_withdrawal` works only between `unlock = request + 24 h` and `unlock + 48 h` (`ERR_WITHDRAWAL_LOCKED` / `ERR_WITHDRAWAL_EXPIRED`). A lapsed request must be re-requested, which restarts the timelock.
+  2. No claim against the provider may be `CLAIM_PENDING` or `UNDER_APPEAL` (`ERR_OPEN_CLAIMS`).
+  3. The queued amount must still be covered by free capital, which stays slashable until it leaves (`ERR_INSUFFICIENT_FREE_CAPITAL`).
+  4. A fresh consensus probe must see the endpoint healthy. DOWN fails with `ERR_ENDPOINT_UNHEALTHY: cannot execute withdrawal while endpoint is failing health checks`, and 429/403 with `ERR_RATE_LIMITED`.
+
+  A provider therefore cannot sit on an unlocked request and cash it out the moment its endpoint fails, before anyone has filed.
 - **After a dismissal:** the escrow returns to committed capital if the policy is still in force (the policy goes back to `ACTIVE`). Otherwise it returns to free capital and the policy becomes `RELEASED`.
 
 **Ledger invariant**, checked after every flow in both test suites:
@@ -175,6 +182,7 @@ The Nth appeal against a provider within a rolling 7-day epoch costs `2^(N−1)`
 | --- | --- | --- | --- | --- |
 | Unchallenged, window closed | payout | bond returned | n/a | loses the escrowed coverage |
 | Appeal → `CONFIRMED` | payout + (slash − reporter share) + forfeited appeal bond | bond + 50% of slash | forfeits bond | loses coverage, and `slash = min(free_capital, payout × 20%)` is taken from free capital |
+| Appeal → `INDETERMINATE_INSUFFICIENT_SAMPLES` (< 3 samples) | policy restored (or released if expired) | bond refunded | full refund | escrow returned |
 | Appeal → `DISMISSED` | policy restored (or released if expired) | forfeits bond to the provider's free capital | full refund | escrow returned |
 
 Bonds, rewards and refunds are credited to `claimable` and withdrawn with `withdraw()` (pull pattern). The payout goes straight to the holder in `claim_payout`.
@@ -203,13 +211,37 @@ All errors are `gl.vm.UserError` with an `ERR_*` prefix. The two required messag
 | Layer | Command | Covers |
 | --- | --- | --- |
 | Static | `make lint` | `genvm-lint lint` and `validate`: 0 errors, 0 warnings |
-| Direct | `make test-direct` | 50 tests including the security-review PoCs (`tests/direct/test_review_poc.py`), 100% line coverage, leader and validator paths |
+| Direct | `make test-direct` | 57 tests including both security-review PoC suites (`tests/direct/test_review_poc.py`, `test_review_poc2.py`), 100% line coverage, leader and validator paths |
 | Integration | `make test-integration` | Full consensus on Studio Next: deploy, registration and its fail-closed guards, coverage, live `attest_probe`, drill, filing guards, a real outage claim escrowed and locked under appeal; `UPTIMESENTRY_SLOW=1` adds the ruling and payout |
 | Live | `make smoke` | Deployed source hash, ledger solvency, provider state and drill against the recorded deployment |
 
 ## 9. Known limitations
 
-- **Rate-limit starvation.** HTTP 429/403 answers are never counted as downtime, so an attacker cannot fake an outage by getting validators rate-limited. The flip side: a provider that answers 429/403 to validators for the entire confirmation window starves a claim of samples, and it closes as recovered. Serving 429 to everyone is, to users, an outage. Counting a *persistent* 429 across the whole window as DOWN is a possible future rule; this contract deliberately fails closed instead.
-- **DNS rebinding.** Endpoint validation happens at registration and sees only the name. A public domain can later be pointed at a private address, and the contract cannot see resolution. Egress policy on validator nodes is the enforcing layer.
-- **Studio Next reads.** Plain reads there skip non-deterministic blocks, so clients call `run_sla_drill` as a write simulation (§6).
+### 9.1 Rate-limit starvation
 
+HTTP 429/403 answers are never counted as downtime, so an attacker cannot fake an outage by getting validators rate-limited. The flip side is that a provider answering 429/403 to validators for the entire confirmation window starves a claim of samples. Such a claim closes as `INDETERMINATE_INSUFFICIENT_SAMPLES`: no payout, but the reporter is refunded.
+
+Serving 429 to everyone is, to users, an outage. Counting a *persistent* 429 across the whole window as DOWN is a possible future rule; this contract deliberately fails closed instead.
+
+### 9.2 DNS rebinding
+
+Endpoint validation happens at registration and sees only the name. A public domain can later be pointed at a private address, and the contract cannot see resolution. Egress policy on validator nodes is the enforcing layer.
+
+### 9.3 Endpoint ownership and anti-squatting (planned v2)
+
+**Current trade-off.** Registration is permissionless: whoever registers an endpoint URL first becomes its underwriter. `provider_id` is derived from the URL, so each URL can be registered once. A third party can therefore underwrite an endpoint it does not operate, squatting it before the real operator arrives.
+
+This does not endanger insured users: every policy is fully collateralised by the squatter's own pool, and settlement depends only on the endpoint's observed behaviour. It does, however:
+
+- let a squatter collect premiums for an endpoint whose reliability it cannot influence;
+- block the real operator from registering its own endpoint.
+
+**Planned v2 ownership verification.** `register_provider` will run a consensus `GET` to `https://<host>/.well-known/uptimesentry.txt`. Registration succeeds only if validators agree that the file contains the registrant's GenLayer address. Proving ownership then means controlling the host's content, the same model as ACME HTTP-01 domain validation. Details to settle:
+
+- Fetch the file at registration, and optionally again on `execute_underwriting_withdrawal`.
+- Bound the response size, and accept only a `2xx` response with the address on its own line.
+- Allow re-verification to transfer a squatted endpoint to the proven owner, after its open policies have expired.
+
+### 9.4 Studio Next reads
+
+Plain reads there skip non-deterministic blocks, so clients call `run_sla_drill` as a write simulation (§6).

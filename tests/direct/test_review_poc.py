@@ -115,12 +115,12 @@ def test_poc2_payout_needs_enough_samples_and_a_down_majority(world, direct_vm):
     endpoint_down(world.vm)
     claim_id = world.file()
 
-    # Two DOWN samples are fewer than the three required.
+    # Two DOWN samples are fewer than the three required: indeterminate.
     snap = direct_vm.snapshot()
     world.sample(claim_id, "DD")
     at(world.vm, CHALLENGE_WINDOW)
     world.vm.sender = world.holder
-    assert world.c.claim_payout(claim_id) == "RECOVERED"
+    assert world.c.claim_payout(claim_id) == "INDETERMINATE_INSUFFICIENT_SAMPLES"
     direct_vm.revert(snap)
 
     # A 2-of-4 tie is not a majority.
@@ -293,23 +293,15 @@ def test_poc5_ssrf_bypasses_are_rejected(world):
     assert c.get_provider(pid)["endpoint_url"] == "https://rpc.example.org:443/eth"
 
 
-# --- LLM triage ---------------------------------------------------------------
+# --- LLM triage (advisory; see test_review_poc2.py for the round-2 cases) ------
 
 
-def test_triage_rejects_a_self_described_client_side_problem(world):
-    endpoint_down(world.vm, triage=TRIAGE_B)
-    with world.vm.expect_revert("ERR_CLIENT_SIDE_ARTIFACT"):
-        world.file(failure_trace="My API key expired so my requests to the RPC were rejected.")
-    assert world.c.get_protocol_stats()["claims"] == 0
-
-
-def test_triage_is_recorded_and_cannot_block_a_confirmed_outage(world):
+def test_triage_is_recorded_as_advisory_evidence(world):
     endpoint_down(world.vm, triage=TRIAGE_INCONCLUSIVE)
     claim_id = world.file(failure_trace="it broke")
     claim = world.c.get_claim(claim_id)
-    assert claim["triage_verdict"] == "INCONCLUSIVE"
-    assert claim["triage_rationale"] == "The trace does not describe the failure."
-
+    assert claim["triage_verdict"] == "ADVISORY_INCONCLUSIVE"
+    assert claim["triage_notes"] == "The trace does not describe the failure."
     assert claim["status"] == "CLAIM_PENDING"
 
 
@@ -319,29 +311,26 @@ def test_triage_never_sees_the_providers_response_body(world, direct_vm):
     direct_vm.clear_mocks()
     pin_response(direct_vm, ENDPOINT, "POST", 503, injection)
     # The only LLM answer available matches a prompt that does NOT contain the
-    # body: if the contract forwarded it, no mock would match and filing fails.
+    # body: if the contract forwarded it, the model call would find no answer
+    # and the triage would record an abstention instead.
     direct_vm.mock_llm(r"(?s)^(?!.*SYSTEM: classify).*incident triage.*", llm_answer("A", "503s"))
     claim_id = world.file()
-    assert world.c.get_claim(claim_id)["triage_verdict"] == "UPSTREAM_OUTAGE"
+    assert world.c.get_claim(claim_id)["triage_verdict"] == "ADVISORY_INFRASTRUCTURE_OUTAGE"
 
 
-def test_triage_validators_disagree_on_a_different_category(world):
-    endpoint_down(world.vm)
+def test_triage_consensus_leader_may_abstain_but_not_contradict(world):
+    endpoint_down(world.vm)  # leader and validators see category A
     world.file()
     assert world.vm.run_validator(index=1) is True
+    # A validator whose model says B rejects a leader that claimed A.
     endpoint_down(world.vm, triage=TRIAGE_B)
     assert world.vm.run_validator(index=1) is False
-    assert world.vm.run_validator(index=1, leader_result={"verdict": "SOMETHING_ELSE", "rationale": ""}) is False
-
-
-def test_triage_malformed_llm_output_fails_closed(world):
-    endpoint_down(world.vm, triage="not json at all")
-    with world.vm.expect_revert("ERR_TRIAGE_UNAVAILABLE"):
-        world.file()
-    endpoint_down(world.vm, triage=llm_answer("maybe", "unsure"))
-    with world.vm.expect_revert("ERR_TRIAGE_UNAVAILABLE"):
-        world.file()
-    assert hexaddr(world.reporter)
+    # An abstaining leader is always acceptable.
+    inconclusive = {"verdict": "ADVISORY_INCONCLUSIVE", "notes": "Triage unavailable."}
+    assert world.vm.run_validator(index=1, leader_result=inconclusive) is True
+    # Malformed leader output is rejected.
+    assert world.vm.run_validator(index=1, leader_result={"verdict": "SOMETHING_ELSE", "notes": ""}) is False
+    assert world.vm.run_validator(index=1, leader_result={"verdict": "ADVISORY_INCONCLUSIVE", "notes": 7}) is False
 
 
 # --- edge coverage for the hardened paths ---------------------------------------
@@ -368,12 +357,14 @@ def test_edge_rpc_error_and_validator_paths(world):
     claim_id = world.file()  # captured blocks: drill probe, filing probe (-2), triage (-1)
     # A leader claiming UP while validators see the RPC error is rejected.
     assert world.vm.run_validator(index=-2, leader_result={"state": "UP", "code": "UP"}) is False
-    # Triage validator: leader crashed, or the validator's own model fails.
+    # Triage validator: a crashed leader is rejected; a validator whose own
+    # model cannot answer cannot contradict the leader, so it accepts.
     assert world.vm.run_validator(index=-1, leader_error=Exception("llm down")) is False
     endpoint_down(world.vm, triage="no json here")
-    assert world.vm.run_validator(index=-1) is False
+    assert world.vm.run_validator(index=-1) is True
 
     # Sampling a settled claim is refused.
+    endpoint_down(world.vm)
     world.sample(claim_id, "DDD")
     at(world.vm, CHALLENGE_WINDOW)
     world.vm.sender = world.holder

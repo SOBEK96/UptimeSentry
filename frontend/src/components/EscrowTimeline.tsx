@@ -10,6 +10,7 @@ const TONE: Record<Claim["status"], { track: string; text: string; dot: string }
   PAID: { track: "bg-emerald-400", text: "text-emerald-300", dot: "border-emerald-400" },
   DISMISSED: { track: "bg-rose-400", text: "text-rose-300", dot: "border-rose-400" },
   RECOVERED: { track: "bg-rose-400", text: "text-rose-300", dot: "border-rose-400" },
+  INDETERMINATE_INSUFFICIENT_SAMPLES: { track: "bg-zinc-400", text: "text-zinc-300", dot: "border-zinc-400" },
 };
 
 // The claim's escrow on a time axis: filing, the provider's allowed downtime
@@ -21,7 +22,7 @@ export function EscrowTimeline({ claim, now }: { claim: Claim; now: number }) {
   const pct = (t: number) => `${frac(t) * 100}%`;
   const tone = TONE[claim.status];
   const locked = claim.status === "UNDER_APPEAL";
-  const settled = claim.status === "PAID" || claim.status === "DISMISSED" || claim.status === "RECOVERED" || claim.status === "CONFIRMED";
+  const settled = claim.status === "PAID" || claim.status === "DISMISSED" || claim.status === "RECOVERED" || claim.status === "INDETERMINATE_INSUFFICIENT_SAMPLES" || claim.status === "CONFIRMED";
   const closes = claim.confirmation_closes ?? claim.confirm_after;
   const samples = claim.samples_total ? ` ${claim.samples_down}/${claim.samples_total} samples DOWN so far.` : "";
   const windowClosed = now >= claim.challenge_deadline;
@@ -32,13 +33,14 @@ export function EscrowTimeline({ claim, now }: { claim: Claim; now: number }) {
     caption = sampling
       ? `Confirmation window open for ${formatDuration(closes - now)}: record samples to prove the outage is sustained.${samples}`
       : windowClosed && now > closes
-        ? `Ready to settle: ${claim.outcome === "SUSTAINED" ? "sustained outage, the payout can be released" : "outage not sustained, the claim will close as recovered"}.`
+        ? `Ready to settle: ${claim.outcome === "SUSTAINED" ? "sustained outage, the payout can be released" : claim.outcome === "INSUFFICIENT" ? "too few samples, stakes will be refunded" : "outage not sustained, the claim will close as recovered"}.`
         : `Payout needs a DOWN majority of samples taken after the allowed downtime, then the challenge deadline.${samples}`;
   else if (locked)
     caption = now > closes ? "Escrow locked. The confirmation window has closed, so the appeal can be ruled on." : `Escrow locked until the appeal is ruled on after ${formatTime(closes)}.${samples}`;
   else if (claim.status === "CONFIRMED") caption = "Breach confirmed by consensus. Payout ready for the insured.";
   else if (claim.status === "DISMISSED") caption = "Outage not sustained across the confirmation window. Claim dismissed.";
   else if (claim.status === "RECOVERED") caption = "Endpoint recovered before the outage became an SLA breach. No payout; escrow returned.";
+  else if (claim.status === "INDETERMINATE_INSUFFICIENT_SAMPLES") caption = "Fewer than 3 confirmation samples: nothing was demonstrated. Escrow returned and bonds refunded.";
   else caption = `Paid out ${formatTime(claim.resolved_at || claim.challenge_deadline)}.`;
 
   return (

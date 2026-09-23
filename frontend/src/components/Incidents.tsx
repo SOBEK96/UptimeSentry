@@ -11,6 +11,7 @@ const STATUS: Record<Claim["status"], { label: string; tone: Tone }> = {
   CONFIRMED: { label: "Breach confirmed", tone: "emerald" },
   DISMISSED: { label: "Dismissed", tone: "rose" },
   RECOVERED: { label: "Recovered · no breach", tone: "rose" },
+  INDETERMINATE_INSUFFICIENT_SAMPLES: { label: "Indeterminate · bonds refunded", tone: "zinc" },
   PAID: { label: "Paid out", tone: "emerald" },
 };
 
@@ -116,7 +117,7 @@ function ClaimCard({ c, p, now, account, busy, onAppeal, onResolve, onPayout, on
   const canSample = open && now >= c.confirm_after && now <= closes && (!c.last_sample_at || now >= c.last_sample_at + 600);
   const canResolve = c.status === "UNDER_APPEAL" && now > closes;
   const canPay = (c.status === "CLAIM_PENDING" && now >= c.challenge_deadline && now > closes) || c.status === "CONFIRMED";
-  const willRecover = c.status === "CLAIM_PENDING" && c.outcome === "RECOVERED";
+  const willRecover = c.status === "CLAIM_PENDING" && (c.outcome === "RECOVERED" || c.outcome === "INSUFFICIENT");
   const you = (a: string) => (sameAddr(account, a) ? "You" : shortAddr(a));
   const s = STATUS[c.status];
   return (
@@ -159,7 +160,7 @@ function ClaimCard({ c, p, now, account, busy, onAppeal, onResolve, onPayout, on
         )}
         {c.triage_verdict && (
           <Stat label="LLM triage">
-            <Mono className={c.triage_verdict === "UPSTREAM_OUTAGE" ? "text-emerald-300" : "text-amber-300"} >{c.triage_verdict.replace(/_/g, " ").toLowerCase()}</Mono>
+            <Mono className={c.triage_verdict === "ADVISORY_INFRASTRUCTURE_OUTAGE" ? "text-emerald-300" : "text-amber-300"}>{c.triage_verdict.replace(/^ADVISORY_/, "").replace(/_/g, " ").toLowerCase()} (advisory)</Mono>
           </Stat>
         )}
         {c.appellant && (
@@ -184,7 +185,7 @@ function ClaimCard({ c, p, now, account, busy, onAppeal, onResolve, onPayout, on
       <details className="group mt-4 text-sm">
         <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">Reported trace and evidence hash</summary>
         <pre className="mt-2 whitespace-pre-wrap rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 font-mono text-xs text-zinc-300">{c.failure_trace}</pre>
-        {c.triage_rationale && <p className="mt-2 text-xs text-zinc-400">Triage: {c.triage_rationale}</p>}
+        {c.triage_notes && <p className="mt-2 text-xs text-zinc-400">Advisory triage: {c.triage_notes}</p>}
         <Mono className="mt-2 block break-all text-xs text-zinc-500">sha256:{c.evidence_hash}</Mono>
       </details>
 
@@ -207,7 +208,7 @@ function ClaimCard({ c, p, now, account, busy, onAppeal, onResolve, onPayout, on
           )}
           {canPay && (
             <Button variant={willRecover ? "ghost" : "success"} disabled={busy} onClick={() => onPayout(c)}>
-              {willRecover ? "Settle as recovered" : `Release ${formatGen(c.payout)} GEN to insured`}
+              {willRecover ? "Settle claim (no breach proven)" : `Release ${formatGen(c.payout)} GEN to insured`}
             </Button>
           )}
         </div>

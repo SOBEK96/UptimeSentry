@@ -192,6 +192,7 @@ def test_underwriting_deposit_and_withdraw(world):
         c.request_underwriting_withdrawal(world.provider_id, free + 1)
     c.request_underwriting_withdrawal(world.provider_id, ATTO)
     at(vm, 86_400)
+    endpoint_healthy(vm)  # execution probes the endpoint
     c.execute_underwriting_withdrawal(world.provider_id)
     assert c.get_provider(world.provider_id)["free_capital"] == free - ATTO
 
@@ -218,8 +219,10 @@ def test_capital_locked_while_claims_open(world):
         world.c.execute_underwriting_withdrawal(world.provider_id)
 
     world.vm.sender = world.watchdog
-    world.c.resolve_appeal(claim_id)  # no samples: not sustained, dismissed
+    # No samples: nothing demonstrated, stakes returned, claim closed.
+    assert world.c.resolve_appeal(claim_id) == "INDETERMINATE_INSUFFICIENT_SAMPLES"
     world.vm.sender = world.provider_owner
+    endpoint_healthy(world.vm)
     assert world.c.execute_underwriting_withdrawal(world.provider_id) == str(ATTO)
     assert_solvent(world.c)
 

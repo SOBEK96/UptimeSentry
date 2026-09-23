@@ -8,23 +8,24 @@ UptimeSentry is a GenLayer **Intelligent Contract**. It combines four things no 
 
 - **Live probes under consensus:** validators probe the endpoint themselves and must agree on what they see.
 - **Parametric settlement:** a claim is decided by a sustained-outage rule over those observations.
-- **LLM triage:** a language model reviews every incident report.
+- **Advisory LLM triage:** a language model reviews every incident report and records its verdict as evidence, without overruling the validators.
 - **Game-theoretic bonds:** reporters, appellants and providers all put GEN at risk.
 
 ## Verified contracts
 
 | Deployment | Address | Status |
 | --- | --- | --- |
-| **Studio Next** (chain 61997), current | [`0xd21347E2516532b036Ae00b2152466f73b7b5E7f`](https://explorer-studio-next.genlayer.com/address/0xd21347E2516532b036Ae00b2152466f73b7b5E7f) | Hardened contract. On-chain source sha256 `ba922b17…37a5e` matches `contracts/uptimesentry.py` byte for byte. Record: [`deployments/studio-next.json`](deployments/studio-next.json) |
-| Studio Next, v1 | [`0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E`](https://explorer-studio-next.genlayer.com/address/0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E) | Superseded (pre security review). Record: [`deployments/studio-next.v1.json`](deployments/studio-next.v1.json) |
+| **Studio Next** (chain 61997), current | [`0x23474374a1B493a1fEe91075a932BcaaCbF6013B`](https://explorer-studio-next.genlayer.com/address/0x23474374a1B493a1fEe91075a932BcaaCbF6013B) | Round-2 hardened contract. On-chain source sha256 `a0aea60c…d5656` matches `contracts/uptimesentry.py` byte for byte. Deploy tx [`0x30b96f42…8d9b`](https://explorer-studio-next.genlayer.com/tx/0x30b96f42a6674df9355c8a52a175891487b3ec3621d3549441fd8f78ca218d9b). Record: [`deployments/studio-next.json`](deployments/studio-next.json) |
+| Studio Next, v2 | [`0xd21347E2516532b036Ae00b2152466f73b7b5E7f`](https://explorer-studio-next.genlayer.com/address/0xd21347E2516532b036Ae00b2152466f73b7b5E7f) | Superseded (round-1 hardening). Record: [`deployments/studio-next.v2.json`](deployments/studio-next.v2.json) |
+| Studio Next, v1 | [`0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E`](https://explorer-studio-next.genlayer.com/address/0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E) | Superseded (pre-review). Record: [`deployments/studio-next.v1.json`](deployments/studio-next.v1.json) |
 
 Live activity on the current contract, all finalized with `MAJORITY_AGREE` (validator consensus). Reproduce with `scripts/bootstrap_live.py`.
 
 | Call | Transaction | Result |
 | --- | --- | --- |
-| `register_provider` (`https://mainnet.base.org`, 10 GEN pool) | [`0x170d78a4…80aa`](https://explorer-studio-next.genlayer.com/tx/0x170d78a45b496bb17953dae56c2a6859e33ed8e6cc923b0def25d5a95d2d80aa) | Provider `0xda1e4a0b…7deb` |
-| `purchase_coverage` (1 GEN, 30 days) | [`0xf877d2fc…a20e`](https://explorer-studio-next.genlayer.com/tx/0xf877d2fce0aad51f80c9576ef36b8fa4171f4bcc11f45497defdfd18c39ea20e) | Policy `…0001` |
-| `attest_probe` | [`0xf3fd27ef…fe18`](https://explorer-studio-next.genlayer.com/tx/0xf3fd27ef3e7620443e5b63e488dc353c74022bf74c9073db73ca5fdf31edfe18) | Validators agreed: `UP` |
+| `register_provider` (`https://mainnet.base.org`, 10 GEN pool) | [`0x5d28adcf…4527`](https://explorer-studio-next.genlayer.com/tx/0x5d28adcfa579a1ced16b70df4b63f8ffa46d9b48afb7030c05f0617fcc524527) | Provider `0xda1e4a0b…7deb` |
+| `purchase_coverage` (1 GEN, 30 days) | [`0x5ed1235e…bc52`](https://explorer-studio-next.genlayer.com/tx/0x5ed1235e72afc93cb7f398452428a675cb6a86aa1bf1c43894c16e70d828bc52) | Policy `…0001` |
+| `attest_probe` | [`0xcd3e6e6d…5d3a`](https://explorer-studio-next.genlayer.com/tx/0xcd3e6e6d24d6c2bec70c90a667bbfa76b5d6eec8a3b7215e3d80f8895d9f5d3a) | Validators agreed: `UP` |
 | `run_sla_drill` (write simulation) | none (not committed) | `REJECTED_TARGET_HEALTHY`, live probe `UP` |
 
 ## Repository
@@ -32,7 +33,7 @@ Live activity on the current contract, all finalized with `MAJORITY_AGREE` (vali
 ```
 contracts/uptimesentry.py      Intelligent contract (GenVM, py-genlayer runner 5jycge4…)
 specs/architecture.md          Protocol specification: binding, lifecycle, escrow, game theory, limitations
-tests/direct/                  50 direct-mode tests incl. security-review PoCs; 100% line coverage
+tests/direct/                  57 direct-mode tests incl. both security-review PoC suites; 100% line coverage
 tests/integration/             Full-consensus suite (gltest) for Studio Next / genlayer up
 scripts/deploy.py              Deploy → verify on-chain source → record deployments/*.json
 scripts/bootstrap_live.py      Seed a deployment with live provider, policy, probe and drill
@@ -45,35 +46,33 @@ Makefile                       install · lint · test · smoke · deploy · pro
 
 ## Security hardening
 
-These are the results of a security review. Each finding has a proof-of-concept test in [`tests/direct/test_review_poc.py`](tests/direct/test_review_poc.py).
+These are the results of a security review. Each finding has a proof-of-concept test in [`test_review_poc.py`](tests/direct/test_review_poc.py) (round 1) or [`test_review_poc2.py`](tests/direct/test_review_poc2.py) (round 2).
 
 | Threat | Defence |
 | --- | --- |
 | Faking an outage by getting validators rate-limited | HTTP 429 and 403 are *indeterminate*, never DOWN. Filing, sampling and probing fail closed with `ERR_RATE_LIMITED: endpoint returned 429/403, cannot determine outage` |
-| One momentary outage paying out | Two-stage confirmation. The filing probe must see DOWN, then at least 3 consensus samples in the window `[confirm_after, confirm_after + 2h]` (10 min apart, via `confirm_outage`) must be mostly DOWN. Otherwise the claim closes as `RECOVERED` and the escrow returns to the pool |
-| A provider draining capital as an outage starts | Two-step withdrawal: `request_underwriting_withdrawal`, then `execute_underwriting_withdrawal` after a 24h timelock with no open claims. Queued capital stays slashable until it leaves |
+| One momentary outage paying out | Two-stage confirmation. The filing probe must see DOWN, then at least 3 consensus samples in the window `[confirm_after, confirm_after + 2h]` (10 min apart, via `confirm_outage`) must be mostly DOWN. A demonstrated recovery (≥ 3 samples, no DOWN majority) closes as `RECOVERED`. Fewer than 3 samples closes as `INDETERMINATE_INSUFFICIENT_SAMPLES` and refunds the reporter's bond |
+| A provider draining capital as an outage starts | Two-step withdrawal: `request_underwriting_withdrawal`, then `execute_underwriting_withdrawal` within 24h–72h of the request, with no open claims, and only while a consensus probe sees the endpoint healthy (`ERR_ENDPOINT_UNHEALTHY`). Queued capital stays slashable until it leaves |
 | A caller picking a favourable moment for the ruling | `resolve_appeal` opens only after the sampling window and runs no probe. The ruling is a pure function of the recorded samples |
 | SSRF against validators | Only public domain names on port 443. Every IP literal is rejected (hex, octal, short and IPv6 forms), as are wildcard-DNS rebinding hosts (`nip.io`, `sslip.io`, `localtest.me`…), `*.localhost`, internal suffixes and credentials in the URL |
 | Evidence aimed at a different target | Evidence must name the exact registered URL and probe payload, or the filing fails with `ERR_UNBOUND_EVIDENCE` |
 | Spam and delay tactics | Reporter bonds double with each open claim. Appeal bonds double with each dispute against the same provider within 7 days |
 
-The known limitations are rate-limit starvation and DNS rebinding after registration. Both are documented in [`specs/architecture.md` §9](specs/architecture.md#9-known-limitations).
+The known limitations are rate-limit starvation, DNS rebinding after registration, and endpoint squatting under permissionless registration (planned v2 fix: `/.well-known/uptimesentry.txt` ownership proof). All are documented in [`specs/architecture.md` §9](specs/architecture.md#9-known-limitations).
 
-## GenVM-native LLM triage
+## GenVM-native LLM triage (advisory)
 
 Every filing runs `gl.nondet.exec_prompt` after validators have confirmed the target is failing. The model classifies the reporter's `failure_trace` against the failure code the contract itself observed:
 
-- **UPSTREAM_OUTAGE:** the trace describes the provider failing.
-- **CLIENT_SIDE_ARTIFACT:** the trace describes the reporter's own problem, such as credentials, quota or a malformed request. The filing is rejected with `ERR_CLIENT_SIDE_ARTIFACT`.
-- **INCONCLUSIVE:** the filing proceeds.
+- `ADVISORY_INFRASTRUCTURE_OUTAGE`: the trace describes the provider failing.
+- `ADVISORY_CLIENT_ARTIFACT`: the trace describes the reporter's own problem.
+- `ADVISORY_INCONCLUSIVE`: neither.
 
-Validators run the prompt independently and must agree on the category. The verdict and a one-sentence rationale are stored on the claim and included in its evidence hash.
+The verdict and a short `triage_notes` summary are stored on the claim and included in its evidence hash, as expert evidence for appeals and dashboards.
 
-The model is deliberately fenced so it cannot be turned against either side:
-
-- **Inputs:** only contract-observed facts and the reporter's own text. The endpoint's response headers and body are provider-controlled and are never sent, so a provider cannot inject instructions that block claims against itself.
-- **Untrusted text:** the reporter's trace is sanitised and delimited as untrusted data.
-- **Limited power:** the model can only reject a reporter's self-described problem. It never creates or enlarges a payout.
+- **Never a veto.** The model cannot overrule the validators' objective DOWN verdict, and a failed or unusable model answer is recorded as `ADVISORY_INCONCLUSIVE`. The model never blocks a filing or changes a payout.
+- **The leader may abstain but not contradict.** Validators accept the leader's verdict when their own model agrees, cannot decide, or when the leader abstained.
+- **The provider can't steer it.** The endpoint's response headers and body are provider-controlled and never reach the model. The reporter's trace is sanitised and delimited as untrusted data.
 
 ## How it works
 
@@ -91,9 +90,10 @@ The model is deliberately fenced so it cannot be turned against either side:
 ```
 file_incident ──► CLAIM_PENDING ──► confirm_outage × n  (samples in [confirm_after, +2h], ≥10 min apart)
      (probe DOWN,            │
-      LLM triage)            ├─ no appeal: after the 24h deadline and the window close ─► claim_payout
+      advisory LLM triage)            ├─ no appeal: after the 24h deadline and the window close ─► claim_payout
                              │      DOWN majority of ≥3 samples ─► PAID
-                             │      otherwise ─────────────────► RECOVERED (escrow back to the pool)
+                             │      ≥3 samples, no DOWN majority ► RECOVERED (bond to the pool)
+                             │      fewer than 3 samples ────────► INDETERMINATE_INSUFFICIENT_SAMPLES (bond refunded)
                              │
                              └─ file_appeal ─► UNDER_APPEAL ─(window closed)─► resolve_appeal
                                     DOWN majority of ≥3 samples ─► CONFIRMED ─► claim_payout ─► PAID
@@ -103,7 +103,7 @@ file_incident ──► CLAIM_PENDING ──► confirm_outage × n  (samples in
 1. **Filing.** `file_incident` requires a native bond and evidence that names the policy's provider id, the exact registered endpoint URL and the exact registered probe payload. Validators then probe the target:
    - **Healthy:** the call reverts with `ERR_NO_OUTAGE_OBSERVED`.
    - **HTTP 429/403:** the call reverts with `ERR_RATE_LIMITED`. A rate limit or WAF block is not evidence of an outage.
-   - **Failing:** an LLM triages the reporter's trace. A trace describing the reporter's own problem is rejected (`ERR_CLIENT_SIDE_ARTIFACT`). Otherwise the full coverage moves into escrow.
+   - **Failing:** the full coverage moves into escrow, and an advisory LLM triage of the reporter's trace is stored with the claim.
 2. **Confirmation.** One failure never pays. Once the provider's allowed downtime has elapsed, anyone may call `confirm_outage` for a fresh consensus sample, at most one every 10 minutes, for 2 hours. The outcome is **sustained** only with at least 3 samples and a strict majority DOWN. Otherwise the claim closes as **recovered**, with the escrow back in the pool and the reporter's bond forfeited to it.
 3. **Challenge window.** The payout stays in escrow for 24 hours. With no appeal, `claim_payout` settles the claim once both the deadline and the confirmation window have passed. It pays a sustained outage and closes a recovered one.
 4. **Appeal.** A provider or watchdog can post an appeal bond to move the claim to `UNDER_APPEAL`. While it's there, every payout attempt fails with `ERR_PAYOUT_LOCKED: funds preserved until appeal resolution`.
@@ -233,7 +233,7 @@ The console needs `genlayer-js` 2.x: the runner rejects the 1.x call encoding wi
 ```bash
 make install                                        # .venv (exact pins) + frontend packages
 make lint                                           # genvm-lint lint + validate: 0 errors, 0 warnings
-make test                                           # 50 direct tests, then the integration suite
+make test                                           # 57 direct tests, then the integration suite
 .venv/bin/python -m pytest tests/direct -q          # direct suite only
 genvm-lint lint contracts/uptimesentry.py
 genvm-lint validate contracts/uptimesentry.py

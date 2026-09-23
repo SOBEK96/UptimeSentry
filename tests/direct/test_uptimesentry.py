@@ -306,10 +306,13 @@ def test_dismissal_after_expiry_frees_capital(world):
     at(world.vm, 31 * 86_400)
     world.vm.sender = world.watchdog
     free_before = world.c.get_provider(world.provider_id)["free_capital"]
-    assert world.c.resolve_appeal(claim_id) == "DISMISSED"
+    # No confirmation samples: indeterminate, so the reporter's bond is
+    # refunded rather than forfeited, and the escrow returns as free capital.
+    assert world.c.resolve_appeal(claim_id) == "INDETERMINATE_INSUFFICIENT_SAMPLES"
     provider = world.c.get_provider(world.provider_id)
     assert provider["committed_capital"] == 0
-    assert provider["free_capital"] == free_before + REPORTER_BOND + COVERAGE
+    assert provider["free_capital"] == free_before + COVERAGE
+    assert world.c.claimable_of(hexaddr(world.reporter)) == REPORTER_BOND
     assert world.c.get_policy(world.policy_id)["status"] == "RELEASED"
     assert_solvent(world.c)
 

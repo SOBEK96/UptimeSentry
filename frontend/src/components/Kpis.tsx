@@ -33,7 +33,7 @@ export function Kpis({ data, now }: { data: Snapshot | null; now: number }) {
   const inForce = policies.filter((p) => (p.status === "ACTIVE" || p.status === "CLAIM_OPEN") && p.expires_at > now);
   const protectedTvl = inForce.reduce((sum, p) => sum + p.coverage, 0n);
   const confirmed = claims.filter((c) => c.status === "CONFIRMED" || c.status === "PAID").length;
-  const dismissed = claims.filter((c) => c.status === "DISMISSED" || c.status === "RECOVERED").length;
+  const dismissed = claims.filter((c) => c.status === "DISMISSED" || c.status === "RECOVERED" || c.status === "INDETERMINATE_INSUFFICIENT_SAMPLES").length;
   const open = claims.filter((c) => c.status === "CLAIM_PENDING" || c.status === "UNDER_APPEAL").length;
 
   return (
@@ -65,7 +65,7 @@ export function Kpis({ data, now }: { data: Snapshot | null; now: number }) {
         foot={
           <>
             <Badge tone="emerald">{confirmed} paid out</Badge>
-            <Badge tone="rose">{dismissed} dismissed</Badge>
+            <Badge tone="rose">{dismissed} not paid</Badge>
             {open > 0 && <Badge tone="amber" dot pulse>{open} open</Badge>}
           </>
         }

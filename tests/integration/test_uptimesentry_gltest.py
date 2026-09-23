@@ -157,7 +157,7 @@ def test_outage_claim_escrows_and_locks_under_appeal(sentry, accounts):
     assert sentry.read("get_claim", [claim["claim_id"]])["status"] == "UNDER_APPEAL"
     sentry.expect_error("ERR_PAYOUT_LOCKED", "claim_payout", [claim["claim_id"]], account=accounts["holder"])
     sentry.expect_error("ERR_ADJUDICATION_NOT_READY", "resolve_appeal", [claim["claim_id"]], account=accounts["watchdog"])
-    assert claim["triage_verdict"] in ("UPSTREAM_OUTAGE", "INCONCLUSIVE")
+    assert claim["triage_verdict"] in ("ADVISORY_INFRASTRUCTURE_OUTAGE", "ADVISORY_CLIENT_ARTIFACT", "ADVISORY_INCONCLUSIVE")
     assert sentry.read("get_protocol_stats")["solvent"] is True
 
 

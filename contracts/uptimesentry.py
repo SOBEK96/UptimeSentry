@@ -30,9 +30,14 @@
 #   queued capital stays slashable until it leaves.
 # - Endpoints reject IP literals in any notation, wildcard-DNS rebinding hosts
 #   and non-443 ports.
-# - Filing runs an LLM triage (gl.nondet.exec_prompt) of the reporter's trace
-#   against the contract-observed failure; it can only reject a reporter's own
-#   self-described client-side problem, never create a payout.
+# - Withdrawals execute only inside a 48h window after the timelock, and only
+#   while a consensus probe sees the endpoint healthy.
+# - Filing runs an advisory LLM triage (gl.nondet.exec_prompt) of the
+#   reporter's trace against the contract-observed failure. It is stored as
+#   evidence and never overrules the validators' DOWN verdict.
+# - A claim whose confirmation window gathered fewer than MIN_CONFIRM_SAMPLES
+#   closes as INDETERMINATE_INSUFFICIENT_SAMPLES: escrow back to the pool and
+#   the reporter's bond refunded, because nothing was demonstrated.
 
 import hashlib
 import json
@@ -78,6 +83,7 @@ RESOLUTION_WINDOW = 2 * 3600  # confirmation samples are taken in [confirm_after
 SAMPLE_INTERVAL = 600  # one confirmation sample per claim per 10 minutes
 MIN_CONFIRM_SAMPLES = 3  # a verdict needs at least 3 samples spanning >= 20 minutes
 WITHDRAWAL_DELAY = CHALLENGE_WINDOW
+WITHDRAWAL_EXECUTION_WINDOW = 2 * DAY  # an unlocked request expires 48h after unlocking
 
 # --- Telemetry ---------------------------------------------------------------
 
@@ -110,9 +116,9 @@ PROBE_UP = "UP"
 PROBE_DOWN = "DOWN"
 PROBE_INDETERMINATE = "INDETERMINATE"
 
-TRIAGE_UPSTREAM = "UPSTREAM_OUTAGE"
-TRIAGE_CLIENT_SIDE = "CLIENT_SIDE_ARTIFACT"
-TRIAGE_INCONCLUSIVE = "INCONCLUSIVE"
+TRIAGE_UPSTREAM = "ADVISORY_INFRASTRUCTURE_OUTAGE"
+TRIAGE_CLIENT_SIDE = "ADVISORY_CLIENT_ARTIFACT"
+TRIAGE_INCONCLUSIVE = "ADVISORY_INCONCLUSIVE"
 TRIAGE_VERDICTS = (TRIAGE_UPSTREAM, TRIAGE_CLIENT_SIDE, TRIAGE_INCONCLUSIVE)
 MAX_RATIONALE_LEN = 280
 MAX_URL_LEN = 256
@@ -133,12 +139,14 @@ CLAIM_CONFIRMED = "CONFIRMED"
 CLAIM_DISMISSED = "DISMISSED"
 CLAIM_PAID = "PAID"
 CLAIM_RECOVERED = "RECOVERED"  # unappealed claim whose outage was not sustained
+CLAIM_INSUFFICIENT = "INDETERMINATE_INSUFFICIENT_SAMPLES"  # too few samples to decide
 
 # --- Error codes -----------------------------------------------------------------
 
 ERR_UNBOUND_EVIDENCE = "ERR_UNBOUND_EVIDENCE: incident telemetry does not match registered target"
 ERR_PAYOUT_LOCKED = "ERR_PAYOUT_LOCKED: funds preserved until appeal resolution"
 ERR_RATE_LIMITED = "ERR_RATE_LIMITED: endpoint returned 429/403, cannot determine outage"
+ERR_ENDPOINT_UNHEALTHY = "ERR_ENDPOINT_UNHEALTHY: cannot execute withdrawal while endpoint is failing health checks"
 
 
 def _fail(code: str, detail: str = "") -> typing.NoReturn:
@@ -215,7 +223,7 @@ class Claim:
     evidence_hash: str
     slash_amount: u256
     triage_verdict: str
-    triage_rationale: str
+    triage_notes: str
     samples_total: u64
     samples_down: u64
     last_sample_at: u64
@@ -444,27 +452,45 @@ def _parse_triage(raw: str) -> dict:
     """Extract the JSON object from the model's text answer (models often wrap
     JSON in prose or code fences)."""
     try:
-        raw = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
+        data = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
     except Exception:
         raise gl.vm.UserError("ERR_TRIAGE_UNAVAILABLE: LLM returned non-JSON")
-    category = str(raw.get("category", raw.get("verdict", ""))).strip().upper()
+    category = str(data.get("category", data.get("verdict", ""))).strip().upper()
     verdict = {"A": TRIAGE_UPSTREAM, "B": TRIAGE_CLIENT_SIDE, "INCONCLUSIVE": TRIAGE_INCONCLUSIVE}.get(category)
     if verdict is None:
         raise gl.vm.UserError("ERR_TRIAGE_UNAVAILABLE: LLM returned no category")
-    rationale = _sanitize_untrusted(str(raw.get("rationale", "")), MAX_RATIONALE_LEN).strip()
-    return {"verdict": verdict, "rationale": rationale}
+    notes = _sanitize_untrusted(str(data.get("rationale", data.get("notes", ""))), MAX_RATIONALE_LEN).strip()
+    return {"verdict": verdict, "notes": notes}
+
+
+def _run_triage(prompt: str) -> dict:
+    """One model call. An unusable answer becomes an abstention, never an error:
+    the triage is advisory and must not block a filing."""
+    try:
+        return _parse_triage(gl.nondet.exec_prompt(prompt))
+    except gl.vm.UserError as err:
+        return {"verdict": TRIAGE_INCONCLUSIVE, "notes": f"Triage unavailable ({str(err.data)[:80]})."}
+    except Exception:
+        return {"verdict": TRIAGE_INCONCLUSIVE, "notes": "Triage unavailable (model error)."}
 
 
 def _consensus_triage(observed_code: str, probe_desc: str, failure_trace: str) -> dict:
-    """LLM triage of the reporter's trace. Validators run their own prompt and
-    must agree on the category; the rationale is informational. Only
-    contract-observed facts and the reporter's own text reach the model: the
-    endpoint's response body is provider-controlled and is never included, so a
-    provider cannot inject instructions to block claims against itself."""
+    """Advisory LLM triage of the reporter's trace, stored as evidence.
+
+    Consensus rule: the leader may abstain (ADVISORY_INCONCLUSIVE) but may not
+    contradict validators. A validator agrees when the categories match, when the
+    leader abstains, or when its own model cannot form an opinion. The triage can
+    therefore never block a filing, and a stored category is one no validator
+    that reached an opinion disputed.
+
+    Only contract-observed facts and the reporter's own text reach the model.
+    The endpoint's response body and headers are provider-controlled and are
+    never included, so a provider cannot steer the evidence recorded against it.
+    """
     prompt = _triage_prompt(observed_code, probe_desc, failure_trace)
 
     def leader_fn() -> dict:
-        return _parse_triage(gl.nondet.exec_prompt(prompt))
+        return _run_triage(prompt)
 
     def validator_fn(leaders_res: gl.vm.Result) -> bool:
         if not isinstance(leaders_res, gl.vm.Return):
@@ -472,11 +498,12 @@ def _consensus_triage(observed_code: str, probe_desc: str, failure_trace: str) -
         claimed = leaders_res.calldata
         if not isinstance(claimed, dict) or claimed.get("verdict") not in TRIAGE_VERDICTS:
             return False
-        try:
-            mine = _parse_triage(gl.nondet.exec_prompt(prompt))
-        except gl.vm.UserError:
+        if not isinstance(claimed.get("notes"), str) or len(claimed["notes"]) > MAX_RATIONALE_LEN + 100:
             return False
-        return mine["verdict"] == claimed["verdict"]
+        if claimed["verdict"] == TRIAGE_INCONCLUSIVE:
+            return True
+        mine = _run_triage(prompt)["verdict"]
+        return mine == TRIAGE_INCONCLUSIVE or mine == claimed["verdict"]
 
     return gl.vm.run_nondet(leader_fn, validator_fn)
 
@@ -570,16 +597,30 @@ class UptimeSentry(gl.contract.Contract):
         return "HTTP GET health check"
 
     def _outcome(self, c: Claim, now: int) -> str:
-        """SUSTAINED, RECOVERED or PENDING. Decided only once the confirmation
-        window has closed, from every sample taken inside it: at least
-        MIN_CONFIRM_SAMPLES and a strict majority DOWN. Nobody chooses the
-        moment of a single decisive probe."""
+        """PENDING, SUSTAINED, RECOVERED or INSUFFICIENT. Decided only once the
+        confirmation window has closed, from every sample taken inside it.
+        Fewer than MIN_CONFIRM_SAMPLES demonstrates nothing (INSUFFICIENT);
+        otherwise a strict majority DOWN is SUSTAINED and anything else
+        RECOVERED. Nobody chooses the moment of a single decisive probe."""
         if now <= int(c.confirm_after) + RESOLUTION_WINDOW:
             return "PENDING"
         total, down = int(c.samples_total), int(c.samples_down)
-        if total >= MIN_CONFIRM_SAMPLES and down * 2 > total:
+        if total < MIN_CONFIRM_SAMPLES:
+            return "INSUFFICIENT"
+        if down * 2 > total:
             return "SUSTAINED"
         return "RECOVERED"
+
+    def _close_insufficient(self, c: Claim, p: Provider, now: int) -> None:
+        # Neither a breach nor a recovery was demonstrated: the escrow returns
+        # to underwriting and the reporter's bond is refunded in full.
+        reporter_bond = int(c.reporter_bond)
+        self.total_bonds -= reporter_bond
+        self._credit(c.reporter, reporter_bond)
+        p.open_claims -= 1
+        self._release_policy_backing(self.policies[c.policy_id], p, int(c.payout), now)
+        c.resolved_at = u64(now)
+        c.status = CLAIM_INSUFFICIENT
 
     def _dismiss(self, c: Claim, p: Provider, now: int) -> None:
         # Not a sustained breach: the reporter's bond is forfeited to the
@@ -692,11 +733,13 @@ class UptimeSentry(gl.contract.Contract):
             _fail("ERR_NOT_PROVIDER_OWNER")
         if amount <= 0:
             _fail("ERR_ZERO_VALUE")
-        if int(p.pending_withdrawal) > 0:
+        now = self._now()
+        expired = now > int(p.withdrawal_unlock_at) + WITHDRAWAL_EXECUTION_WINDOW
+        if int(p.pending_withdrawal) > 0 and not expired:
             _fail("ERR_WITHDRAWAL_PENDING", "cancel or execute the queued withdrawal first")
         if amount > int(p.free_capital):
             _fail("ERR_INSUFFICIENT_FREE_CAPITAL")
-        unlock = self._now() + WITHDRAWAL_DELAY
+        unlock = now + WITHDRAWAL_DELAY
         p.pending_withdrawal = u256(amount)
         p.withdrawal_unlock_at = u64(unlock)
         return unlock
@@ -720,14 +763,25 @@ class UptimeSentry(gl.contract.Contract):
         amount = int(p.pending_withdrawal)
         if amount == 0:
             _fail("ERR_NO_PENDING_WITHDRAWAL")
-        if self._now() < int(p.withdrawal_unlock_at):
+        now = self._now()
+        if now < int(p.withdrawal_unlock_at):
             _fail("ERR_WITHDRAWAL_LOCKED", "the withdrawal timelock has not elapsed")
+        if now > int(p.withdrawal_unlock_at) + WITHDRAWAL_EXECUTION_WINDOW:
+            _fail("ERR_WITHDRAWAL_EXPIRED", "the request lapsed 48h after unlocking; request again")
         # Free capital is the slashing base: it cannot leave while any claim
         # against this provider is unresolved.
         if int(p.open_claims) > 0:
             _fail("ERR_OPEN_CLAIMS", "capital is locked while claims are unresolved")
         if amount > int(p.free_capital):
             _fail("ERR_INSUFFICIENT_FREE_CAPITAL", "capital was slashed or committed since the request")
+        # A provider cannot sit on an unlocked request and cash it out the
+        # moment its endpoint fails: capital leaves only while validators agree
+        # the endpoint is healthy.
+        observed = _consensus_probe(p.endpoint_url, p.probe_kind, p.probe_payload)
+        if observed["state"] == PROBE_INDETERMINATE:
+            raise gl.vm.UserError(ERR_RATE_LIMITED)
+        if observed["state"] != PROBE_UP:
+            raise gl.vm.UserError(ERR_ENDPOINT_UNHEALTHY)
         p.pending_withdrawal = u256(0)
         p.withdrawal_unlock_at = u64(0)
         p.free_capital -= amount
@@ -854,9 +908,9 @@ class UptimeSentry(gl.contract.Contract):
         if observed["state"] == PROBE_UP:
             _fail("ERR_NO_OUTAGE_OBSERVED", "consensus probe of the registered target is healthy")
 
+        # Advisory only: validators already agreed the target is DOWN, and the
+        # model never overrules that. Its verdict is stored as evidence.
         triage = _consensus_triage(observed["code"], self._probe_desc(p), failure_trace)
-        if triage["verdict"] == TRIAGE_CLIENT_SIDE:
-            _fail("ERR_CLIENT_SIDE_ARTIFACT", "the reported trace describes a problem on the reporter's side")
 
         bond = self._receive()
         self.total_bonds += bond
@@ -904,7 +958,7 @@ class UptimeSentry(gl.contract.Contract):
             evidence_hash=evidence_hash,
             slash_amount=u256(0),
             triage_verdict=triage["verdict"],
-            triage_rationale=triage["rationale"],
+            triage_notes=triage["notes"],
             samples_total=u64(0),
             samples_down=u64(0),
             last_sample_at=u64(0),
@@ -984,6 +1038,12 @@ class UptimeSentry(gl.contract.Contract):
         appeal_bond = int(c.appeal_bond)
         self.total_bonds -= appeal_bond
 
+        if outcome == "INSUFFICIENT":
+            # Nothing demonstrated either way: everyone gets their stake back.
+            self._close_insufficient(c, p, now)
+            self._credit(c.appellant, appeal_bond)
+            return c.status
+
         if outcome == "SUSTAINED":
             # Sustained outage confirmed: the payout stays escrowed for the
             # insured, the provider is slashed, the reporter is rewarded and the
@@ -1016,7 +1076,7 @@ class UptimeSentry(gl.contract.Contract):
         c = self._claim(claim_id)
         if c.status == CLAIM_UNDER_APPEAL:
             raise gl.vm.UserError(ERR_PAYOUT_LOCKED)
-        if c.status == CLAIM_DISMISSED or c.status == CLAIM_RECOVERED:
+        if c.status == CLAIM_DISMISSED or c.status == CLAIM_RECOVERED or c.status == CLAIM_INSUFFICIENT:
             _fail("ERR_CLAIM_DISMISSED")
         if c.status == CLAIM_PAID:
             _fail("ERR_ALREADY_SETTLED")
@@ -1028,6 +1088,9 @@ class UptimeSentry(gl.contract.Contract):
             outcome = self._outcome(c, now)
             if outcome == "PENDING":
                 _fail("ERR_OUTAGE_UNCONFIRMED", "the confirmation window has not closed")
+            if outcome == "INSUFFICIENT":
+                self._close_insufficient(c, p, now)
+                return c.status
             if outcome == "RECOVERED":
                 # The filing observed one failure but the outage was not
                 # sustained: no payout, escrow back to the pool.
@@ -1161,6 +1224,7 @@ class UptimeSentry(gl.contract.Contract):
             "required_reporter_bond": self._required_reporter_bond(p),
             "pending_withdrawal": int(p.pending_withdrawal),
             "withdrawal_unlock_at": int(p.withdrawal_unlock_at),
+            "withdrawal_expires_at": (int(p.withdrawal_unlock_at) + WITHDRAWAL_EXECUTION_WINDOW) if int(p.pending_withdrawal) > 0 else 0,
         }
 
     def _policy_view(self, pol: Policy) -> dict:
@@ -1202,7 +1266,7 @@ class UptimeSentry(gl.contract.Contract):
             "evidence_hash": c.evidence_hash,
             "slash_amount": int(c.slash_amount),
             "triage_verdict": c.triage_verdict,
-            "triage_rationale": c.triage_rationale,
+            "triage_notes": c.triage_notes,
             "samples_total": int(c.samples_total),
             "samples_down": int(c.samples_down),
             "last_sample_at": int(c.last_sample_at),
@@ -1293,4 +1357,5 @@ class UptimeSentry(gl.contract.Contract):
             "sample_interval_s": SAMPLE_INTERVAL,
             "min_confirm_samples": MIN_CONFIRM_SAMPLES,
             "withdrawal_delay_s": WITHDRAWAL_DELAY,
+            "withdrawal_execution_window_s": WITHDRAWAL_EXECUTION_WINDOW,
         }
