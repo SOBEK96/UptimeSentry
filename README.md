@@ -42,21 +42,25 @@ Makefile                       install · lint · test · smoke · deploy · pro
 ### Claim lifecycle
 
 ```
-file_incident ──► CLAIM_PENDING ──(24h challenge window, no appeal)──► claim_payout ──► PAID
-                      │
-                      └── file_appeal ──► UNDER_APPEAL ──(after the downtime window)──► resolve_appeal
-                                                                                            │
-                                               target still failing ◄──────────────────────┤
-                                               CONFIRMED ──► claim_payout ──► PAID          │
-                                                                                            │
-                                               target healthy ◄────────────────────────────┘
-                                               DISMISSED (escrow returns to the pool)
+file_incident ──► CLAIM_PENDING ──► confirm_outage × n  (samples in [confirm_after, +2h], ≥10 min apart)
+     (probe DOWN,            │
+      LLM triage)            ├─ no appeal: after the 24h deadline and the window close ─► claim_payout
+                             │      DOWN majority of ≥3 samples ─► PAID
+                             │      otherwise ─────────────────► RECOVERED (escrow back to the pool)
+                             │
+                             └─ file_appeal ─► UNDER_APPEAL ─(window closed)─► resolve_appeal
+                                    DOWN majority of ≥3 samples ─► CONFIRMED ─► claim_payout ─► PAID
+                                    otherwise ─────────────────► DISMISSED
 ```
 
-1. **Filing.** `file_incident` requires a native bond and evidence that names the policy's provider id, the exact registered endpoint URL and the exact registered probe payload. Validators then probe the target. If consensus finds it healthy, the call reverts with `ERR_NO_OUTAGE_OBSERVED`. If it's failing, the full coverage moves from the provider's committed capital into escrow.
-2. **Challenge window.** The payout stays in escrow for 24 hours. With no appeal, anyone can call `claim_payout` once the window closes. The insured gets the payout and the reporter gets their bond back.
-3. **Appeal.** A provider or watchdog can post an appeal bond to move the claim to `UNDER_APPEAL`. While it's there, every payout attempt fails with `ERR_PAYOUT_LOCKED: funds preserved until appeal resolution`.
-4. **Ruling.** `resolve_appeal` opens once the provider's allowed downtime window has passed since filing. Validators probe the target again. A confirmed breach therefore means two independent consensus observations of failure, spanning the SLA window.
+1. **Filing.** `file_incident` requires a native bond and evidence that names the policy's provider id, the exact registered endpoint URL and the exact registered probe payload. Validators then probe the target:
+   - **Healthy:** the call reverts with `ERR_NO_OUTAGE_OBSERVED`.
+   - **HTTP 429/403:** the call reverts with `ERR_RATE_LIMITED`. A rate limit or WAF block is not evidence of an outage.
+   - **Failing:** an LLM triages the reporter's trace. A trace describing the reporter's own problem is rejected (`ERR_CLIENT_SIDE_ARTIFACT`). Otherwise the full coverage moves into escrow.
+2. **Confirmation.** One failure never pays. Once the provider's allowed downtime has elapsed, anyone may call `confirm_outage` for a fresh consensus sample, at most one every 10 minutes, for 2 hours. The outcome is **sustained** only with at least 3 samples and a strict majority DOWN. Otherwise the claim closes as **recovered**, with the escrow back in the pool and the reporter's bond forfeited to it.
+3. **Challenge window.** The payout stays in escrow for 24 hours. With no appeal, `claim_payout` settles the claim once both the deadline and the confirmation window have passed. It pays a sustained outage and closes a recovered one.
+4. **Appeal.** A provider or watchdog can post an appeal bond to move the claim to `UNDER_APPEAL`. While it's there, every payout attempt fails with `ERR_PAYOUT_LOCKED: funds preserved until appeal resolution`.
+5. **Ruling.** `resolve_appeal` opens when the confirmation window closes. It runs no probe: the ruling is a pure function of the recorded samples, so the moment it is called cannot change it.
 
 ### Settlement
 
@@ -72,7 +76,7 @@ Credits go to a pull-based balance and are withdrawn with `withdraw()`. The insu
 
 - **Escalating reporter bonds.** The required bond doubles for each claim already open against the same provider (`1 × 2^open_claims` GEN, capped at 256×). Spamming reports to lock a provider's capital gets exponentially expensive.
 - **Escalating appeal bonds.** The Nth appeal against a provider within a 7-day epoch costs `2^(N-1)` times the base. Blanket-appealing every claim to stall payouts, or racing sybil appeals, drains the appellant rather than the pool.
-- **Capital lock.** A provider can't withdraw free capital while any claim against them is unresolved, so the slashing base can't be pulled out ahead of a ruling.
+- **Withdrawal timelock.** Withdrawals take two steps. `request_underwriting_withdrawal` queues an amount. `execute_underwriting_withdrawal` works only after 24 hours and with no open claims. Queued capital stays in the pool and stays slashable, so a provider can't pull the slashing base out as an outage starts.
 - **Conflict rules.** Providers can't insure or report on their own endpoint. Reporters and insured holders can't appeal their own claim.
 
 ### Evidence binding and telemetry
@@ -109,13 +113,15 @@ total_deposited − total_withdrawn == underwriting + escrow + bonds + claimable
 | Method | Kind | Notes |
 | --- | --- | --- |
 | `register_provider(name, endpoint_url, probe_kind, probe_payload, max_downtime_s, target_availability_bps, premium_bps)` | payable write | Pool ≥ 10 GEN; downtime window 5 min–24 h; target 90–100%; premium 0.01–50% per 30 days |
-| `deposit_underwriting(provider_id)` / `withdraw_underwriting(provider_id, amount)` | payable write / write | Owner only; withdrawals blocked while claims are open |
+| `deposit_underwriting(provider_id)` | payable write | Owner only |
+| `request_underwriting_withdrawal(provider_id, amount)` / `execute_underwriting_withdrawal(provider_id)` / `cancel_underwriting_withdrawal(provider_id)` | write | Owner only; executes after a 24h timelock with no open claims |
 | `set_accepting_policies(provider_id, accepting)` | write | Pause or resume new coverage |
 | `purchase_coverage(provider_id, coverage, term_days)` | payable write | Value must equal `quote_premium` exactly |
 | `release_expired_policy(policy_id)` | write | Returns an expired policy's backing to free capital |
 | `file_incident(policy_id, target_provider_id, target_endpoint_url, probe_payload, failure_trace)` | payable write | Consensus probe; escrows payout |
 | `file_appeal(claim_id)` | payable write | During the challenge window |
-| `resolve_appeal(claim_id)` | write | After the downtime window; consensus probe |
+| `confirm_outage(claim_id)` | write | Consensus sample in `[confirm_after, +2h]`, one per 10 min |
+| `resolve_appeal(claim_id)` | write | After the confirmation window; decided from the samples |
 | `claim_payout(claim_id)` | write | Pays the insured |
 | `withdraw()` | write | Pull credited bonds, rewards and refunds |
 | `attest_probe(provider_id)` | write | Consensus health observation |

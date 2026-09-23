@@ -157,18 +157,28 @@ def test_outage_claim_escrows_and_locks_under_appeal(sentry, accounts):
     assert sentry.read("get_claim", [claim["claim_id"]])["status"] == "UNDER_APPEAL"
     sentry.expect_error("ERR_PAYOUT_LOCKED", "claim_payout", [claim["claim_id"]], account=accounts["holder"])
     sentry.expect_error("ERR_ADJUDICATION_NOT_READY", "resolve_appeal", [claim["claim_id"]], account=accounts["watchdog"])
+    assert claim["triage_verdict"] in ("UPSTREAM_OUTAGE", "INCONCLUSIVE")
     assert sentry.read("get_protocol_stats")["solvent"] is True
 
 
-@pytest.mark.skipif(os.environ.get("UPTIMESENTRY_SLOW") != "1", reason="waits out the 5-minute downtime window; set UPTIMESENTRY_SLOW=1")
+@pytest.mark.skipif(os.environ.get("UPTIMESENTRY_SLOW") != "1", reason="samples the 2h confirmation window in real time (~2.5h); set UPTIMESENTRY_SLOW=1")
 def test_appeal_ruling_confirms_sustained_outage(sentry, accounts):
     claim_id = STATE["down_claim"]
-    wait = sentry.read("get_claim", [claim_id])["confirm_after"] - int(time.time()) + 5
+    claim = sentry.read("get_claim", [claim_id])
+    # Three consensus samples, 10 minutes apart, inside the confirmation window.
+    for i in range(3):
+        wait = claim["confirm_after"] + i * 600 - int(time.time()) + 5
+        if wait > 0:
+            time.sleep(wait)
+        assert tx_execution_succeeded(sentry.write("confirm_outage", [claim_id], account=accounts["watchdog"]))
+    claim = sentry.read("get_claim", [claim_id])
+    assert claim["samples_down"] == 3
+    wait = claim["confirmation_closes"] - int(time.time()) + 5
     if wait > 0:
         time.sleep(wait)
     assert tx_execution_succeeded(sentry.write("resolve_appeal", [claim_id], account=accounts["watchdog"]))
     claim = sentry.read("get_claim", [claim_id])
-    assert claim["status"] == "CONFIRMED" and claim["ruling_probe_code"] == "UNREACHABLE"
+    assert claim["status"] == "CONFIRMED" and claim["ruling_probe_code"] == "3/3 DOWN"
     assert tx_execution_succeeded(sentry.write("claim_payout", [claim_id], account=accounts["watchdog"]))
     assert sentry.read("get_claim", [claim_id])["status"] == "PAID"
     assert sentry.read("get_protocol_stats")["solvent"] is True

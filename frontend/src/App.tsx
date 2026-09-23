@@ -143,6 +143,7 @@ export default function App() {
                 onReport={(pol, prov, trace, bond) => void tx.run("File incident", "file_incident", [pol.policy_id, prov.provider_id, prov.endpoint_url, prov.probe_payload, trace], bond)}
                 onAppeal={(c) => void tx.run("Appeal claim", "file_appeal", [c.claim_id], c.required_appeal_bond)}
                 onResolve={(c) => void tx.run("Rule on appeal", "resolve_appeal", [c.claim_id])}
+                onConfirm={(c) => void tx.run("Record confirmation sample", "confirm_outage", [c.claim_id])}
                 onPayout={(c) => void tx.run("Release payout", "claim_payout", [c.claim_id])}
               />
             ) : tab === "drill" ? (

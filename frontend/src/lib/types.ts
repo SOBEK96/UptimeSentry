@@ -40,7 +40,7 @@ export interface Policy {
   status: PolicyStatus;
 }
 
-export type ClaimStatus = "CLAIM_PENDING" | "UNDER_APPEAL" | "CONFIRMED" | "DISMISSED" | "PAID";
+export type ClaimStatus = "CLAIM_PENDING" | "UNDER_APPEAL" | "CONFIRMED" | "DISMISSED" | "RECOVERED" | "PAID";
 
 export interface Claim {
   claim_id: string;
@@ -63,6 +63,13 @@ export interface Claim {
   failure_trace: string;
   evidence_hash: string;
   slash_amount: bigint;
+  triage_verdict?: string;
+  triage_rationale?: string;
+  samples_total?: number;
+  samples_down?: number;
+  last_sample_at?: number;
+  confirmation_closes?: number;
+  outcome?: "SUSTAINED" | "RECOVERED" | "PENDING" | "";
 }
 
 export interface ProtocolStats {
@@ -90,6 +97,7 @@ export type DrillVerdict =
   | "CLAIM_WOULD_BE_ACCEPTED"
   | "REJECTED_TARGET_HEALTHY"
   | "REJECTED_POLICY_NOT_ACTIVE"
+  | "REJECTED_RATE_LIMITED"
   | "REJECTED_UNBOUND_EVIDENCE";
 
 export interface DrillResult {

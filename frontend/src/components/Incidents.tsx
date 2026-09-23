@@ -10,6 +10,7 @@ const STATUS: Record<Claim["status"], { label: string; tone: Tone }> = {
   UNDER_APPEAL: { label: "Under appeal · escrow locked", tone: "sky" },
   CONFIRMED: { label: "Breach confirmed", tone: "emerald" },
   DISMISSED: { label: "Dismissed", tone: "rose" },
+  RECOVERED: { label: "Recovered · no breach", tone: "rose" },
   PAID: { label: "Paid out", tone: "emerald" },
 };
 
@@ -24,6 +25,7 @@ interface Props {
   onReport: (policy: Policy, provider: Provider, trace: string, bond: bigint) => void;
   onAppeal: (c: Claim) => void;
   onResolve: (c: Claim) => void;
+  onConfirm: (c: Claim) => void;
   onPayout: (c: Claim) => void;
 }
 
@@ -107,10 +109,14 @@ function ReportForm({ policies, providers, now, busy, account, focusProvider, on
   );
 }
 
-function ClaimCard({ c, p, now, account, busy, onAppeal, onResolve, onPayout }: Props & { c: Claim; p?: Provider }) {
+function ClaimCard({ c, p, now, account, busy, onAppeal, onResolve, onPayout, onConfirm }: Props & { c: Claim; p?: Provider }) {
+  const closes = c.confirmation_closes ?? c.confirm_after;
+  const open = c.status === "CLAIM_PENDING" || c.status === "UNDER_APPEAL";
   const canAppeal = c.status === "CLAIM_PENDING" && now < c.challenge_deadline && !sameAddr(account, c.reporter) && !sameAddr(account, c.holder);
-  const canResolve = c.status === "UNDER_APPEAL" && now >= c.confirm_after;
-  const canPay = (c.status === "CLAIM_PENDING" && now >= c.challenge_deadline) || c.status === "CONFIRMED";
+  const canSample = open && now >= c.confirm_after && now <= closes && (!c.last_sample_at || now >= c.last_sample_at + 600);
+  const canResolve = c.status === "UNDER_APPEAL" && now > closes;
+  const canPay = (c.status === "CLAIM_PENDING" && now >= c.challenge_deadline && now > closes) || c.status === "CONFIRMED";
+  const willRecover = c.status === "CLAIM_PENDING" && c.outcome === "RECOVERED";
   const you = (a: string) => (sameAddr(account, a) ? "You" : shortAddr(a));
   const s = STATUS[c.status];
   return (
@@ -146,6 +152,16 @@ function ClaimCard({ c, p, now, account, busy, onAppeal, onResolve, onPayout }: 
         <Stat label="Filing probe">
           <Mono className="text-rose-300">{c.filing_probe_code}</Mono>
         </Stat>
+        {c.samples_total !== undefined && (
+          <Stat label="Confirmation samples">
+            <Mono>{c.samples_down}/{c.samples_total} DOWN</Mono>
+          </Stat>
+        )}
+        {c.triage_verdict && (
+          <Stat label="LLM triage">
+            <Mono className={c.triage_verdict === "UPSTREAM_OUTAGE" ? "text-emerald-300" : "text-amber-300"} >{c.triage_verdict.replace(/_/g, " ").toLowerCase()}</Mono>
+          </Stat>
+        )}
         {c.appellant && (
           <Stat label="Appellant · bond">
             <Mono>
@@ -168,11 +184,17 @@ function ClaimCard({ c, p, now, account, busy, onAppeal, onResolve, onPayout }: 
       <details className="group mt-4 text-sm">
         <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">Reported trace and evidence hash</summary>
         <pre className="mt-2 whitespace-pre-wrap rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 font-mono text-xs text-zinc-300">{c.failure_trace}</pre>
+        {c.triage_rationale && <p className="mt-2 text-xs text-zinc-400">Triage: {c.triage_rationale}</p>}
         <Mono className="mt-2 block break-all text-xs text-zinc-500">sha256:{c.evidence_hash}</Mono>
       </details>
 
-      {(canAppeal || canResolve || canPay) && (
+      {(canAppeal || canSample || canResolve || canPay) && (
         <div className="mt-4 flex flex-wrap justify-end gap-2">
+          {canSample && (
+            <Button variant="ghost" disabled={busy} onClick={() => onConfirm(c)} title="Validators probe the endpoint; payout needs a DOWN majority of these samples">
+              Record confirmation sample
+            </Button>
+          )}
           {canAppeal && (
             <Button variant="ghost" disabled={busy} onClick={() => onAppeal(c)}>
               Appeal · {formatGen(c.required_appeal_bond)} GEN bond
@@ -184,8 +206,8 @@ function ClaimCard({ c, p, now, account, busy, onAppeal, onResolve, onPayout }: 
             </Button>
           )}
           {canPay && (
-            <Button variant="success" disabled={busy} onClick={() => onPayout(c)}>
-              Release {formatGen(c.payout)} GEN to insured
+            <Button variant={willRecover ? "ghost" : "success"} disabled={busy} onClick={() => onPayout(c)}>
+              {willRecover ? "Settle as recovered" : `Release ${formatGen(c.payout)} GEN to insured`}
             </Button>
           )}
         </div>

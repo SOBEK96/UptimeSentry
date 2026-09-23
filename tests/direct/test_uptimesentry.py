@@ -9,6 +9,7 @@ from sentry_helpers import (
     PREMIUM,
     PROBE,
     REPORTER_BOND,
+    WINDOW_CLOSED,
     UNDERWRITING,
     assert_solvent,
     at,
@@ -95,16 +96,16 @@ def test_fraudulent_claim_slashing(world):
     world.appeal(claim_id)
     pool_before = world.c.get_provider(world.provider_id)
 
-    # The target is healthy when the downtime window elapses: the outage never
-    # breached the SLA, so the claim is dismissed.
-    endpoint_healthy(world.vm)
-    at(world.vm, MAX_DOWNTIME)
+    # The target is healthy throughout the confirmation window: the outage
+    # never breached the SLA, so the claim is dismissed.
+    world.sample(claim_id, "UUU")
+    at(world.vm, WINDOW_CLOSED)
     world.vm.sender = world.watchdog
     assert world.c.resolve_appeal(claim_id) == "DISMISSED"
 
     claim = world.c.get_claim(claim_id)
     provider = world.c.get_provider(world.provider_id)
-    assert claim["ruling_probe_code"] == "UP"
+    assert claim["ruling_probe_code"] == "0/3 DOWN"
     # Reporter bond slashed into the provider's pool, escrow back to backing
     # the still-active policy.
     assert provider["free_capital"] == pool_before["free_capital"] + REPORTER_BOND
@@ -139,15 +140,15 @@ def test_legitimate_claim_settlement(world):
     world.appeal(claim_id)
     free_before = world.c.get_provider(world.provider_id)["free_capital"]
 
-    # Still failing once the allowed downtime window has elapsed: breach.
-    endpoint_rpc_error(world.vm)
-    at(world.vm, MAX_DOWNTIME)
+    # Still failing across the confirmation window: sustained breach.
+    world.sample(claim_id, "DDD")
+    at(world.vm, WINDOW_CLOSED)
     world.vm.sender = world.watchdog
     assert world.c.resolve_appeal(claim_id) == "CONFIRMED"
 
     claim = world.c.get_claim(claim_id)
     provider = world.c.get_provider(world.provider_id)
-    assert claim["ruling_probe_code"] == "RPC_ERROR"
+    assert claim["ruling_probe_code"] == "3/3 DOWN"
     assert claim["slash_amount"] == SLASH
     assert provider["free_capital"] == free_before - SLASH
     assert provider["total_slashed"] == SLASH
@@ -243,6 +244,7 @@ def test_unchallenged_claim_pays_after_window(world):
     assert stats["total_escrow"] == COVERAGE
     assert world.c.get_policy(world.policy_id)["status"] == "CLAIM_OPEN"
 
+    world.sample(claim_id, "DDD")
     world.vm.sender = world.holder
     with world.vm.expect_revert("ERR_CHALLENGE_WINDOW_OPEN"):
         world.c.claim_payout(claim_id)
@@ -272,10 +274,11 @@ def test_resolution_waits_for_downtime_window(world):
     with world.vm.expect_revert("ERR_NOT_UNDER_APPEAL"):
         world.c.resolve_appeal(claim_id)
     world.appeal(claim_id)
-    at(world.vm, MAX_DOWNTIME - 1)
-    world.vm.sender = world.watchdog
-    with world.vm.expect_revert("ERR_ADJUDICATION_NOT_READY"):
-        world.c.resolve_appeal(claim_id)
+    for t in (MAX_DOWNTIME - 1, MAX_DOWNTIME, WINDOW_CLOSED - 1):
+        at(world.vm, t)
+        world.vm.sender = world.watchdog
+        with world.vm.expect_revert("ERR_ADJUDICATION_NOT_READY"):
+            world.c.resolve_appeal(claim_id)
     assert world.c.get_claim(claim_id)["status"] == "UNDER_APPEAL"
 
 

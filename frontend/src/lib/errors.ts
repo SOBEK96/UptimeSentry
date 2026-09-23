@@ -31,6 +31,17 @@ const MESSAGES: Record<string, string> = {
   ERR_PROBE_RATE_LIMITED: "This endpoint was probed in the last 5 minutes. Try again shortly.",
   ERR_NOT_PROVIDER_OWNER: "Only the endpoint's underwriter can do this.",
   ERR_CLAIM_DISMISSED: "This claim was dismissed.",
+  ERR_RATE_LIMITED: "The endpoint answered 429/403 (rate limited). That says nothing about an outage, so nothing was recorded. Try again later.",
+  ERR_CLIENT_SIDE_ARTIFACT: "The triage found that your trace describes a problem on your side, not the provider's.",
+  ERR_TRIAGE_UNAVAILABLE: "The incident triage could not reach a verdict. Try filing again.",
+  ERR_CONFIRMATION_NOT_OPEN: "Confirmation samples open once the allowed downtime has elapsed.",
+  ERR_CONFIRMATION_CLOSED: "The confirmation window for this claim has closed.",
+  ERR_SAMPLE_TOO_SOON: "This claim was sampled in the last 10 minutes.",
+  ERR_CLAIM_NOT_OPEN: "This claim is already settled.",
+  ERR_OUTAGE_UNCONFIRMED: "The outage can't be settled until its confirmation window closes.",
+  ERR_WITHDRAWAL_LOCKED: "The withdrawal timelock hasn't elapsed yet.",
+  ERR_WITHDRAWAL_PENDING: "A withdrawal is already queued.",
+  ERR_NO_PENDING_WITHDRAWAL: "There is no queued withdrawal.",
   ERR_ALREADY_SETTLED: "This claim has already been paid.",
 };
 

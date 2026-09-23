@@ -13,6 +13,7 @@ from sentry_helpers import (
     PROBE_CANONICAL,
     REPORTER_BOND,
     UNDERWRITING,
+    WINDOW_CLOSED,
     assert_solvent,
     at,
     call_with_value,
@@ -186,15 +187,17 @@ def test_underwriting_deposit_and_withdraw(world):
     call_with_value(vm, 3 * ATTO, c.deposit_underwriting, world.provider_id)
     free = c.get_provider(world.provider_id)["free_capital"]
     with vm.expect_revert("ERR_ZERO_VALUE"):
-        c.withdraw_underwriting(world.provider_id, 0)
+        c.request_underwriting_withdrawal(world.provider_id, 0)
     with vm.expect_revert("ERR_INSUFFICIENT_FREE_CAPITAL"):
-        c.withdraw_underwriting(world.provider_id, free + 1)
-    c.withdraw_underwriting(world.provider_id, ATTO)
+        c.request_underwriting_withdrawal(world.provider_id, free + 1)
+    c.request_underwriting_withdrawal(world.provider_id, ATTO)
+    at(vm, 86_400)
+    c.execute_underwriting_withdrawal(world.provider_id)
     assert c.get_provider(world.provider_id)["free_capital"] == free - ATTO
 
     vm.sender = world.watchdog
     with vm.expect_revert("ERR_NOT_PROVIDER_OWNER"):
-        c.withdraw_underwriting(world.provider_id, ATTO)
+        c.request_underwriting_withdrawal(world.provider_id, ATTO)
     with vm.expect_revert("ERR_NOT_PROVIDER_OWNER"):
         call_with_value(vm, ATTO, c.deposit_underwriting, world.provider_id)
     stats = assert_solvent(c)
@@ -202,22 +205,22 @@ def test_underwriting_deposit_and_withdraw(world):
 
 
 def test_capital_locked_while_claims_open(world):
+    world.vm.sender = world.provider_owner
+    world.c.request_underwriting_withdrawal(world.provider_id, ATTO)
     endpoint_down(world.vm)
     claim_id = world.file()
-    world.vm.sender = world.provider_owner
-    # The provider cannot pull free capital out from under a pending slash.
-    with world.vm.expect_revert("ERR_OPEN_CLAIMS"):
-        world.c.withdraw_underwriting(world.provider_id, ATTO)
     world.appeal(claim_id)
+    # Past the timelock, but the provider still cannot pull free capital out
+    # from under a pending slash.
+    at(world.vm, 86_400)
     world.vm.sender = world.provider_owner
     with world.vm.expect_revert("ERR_OPEN_CLAIMS"):
-        world.c.withdraw_underwriting(world.provider_id, ATTO)
+        world.c.execute_underwriting_withdrawal(world.provider_id)
 
-    endpoint_healthy(world.vm)
-    at(world.vm, MAX_DOWNTIME)
-    world.c.resolve_appeal(claim_id)
+    world.vm.sender = world.watchdog
+    world.c.resolve_appeal(claim_id)  # no samples: not sustained, dismissed
     world.vm.sender = world.provider_owner
-    world.c.withdraw_underwriting(world.provider_id, ATTO)
+    assert world.c.execute_underwriting_withdrawal(world.provider_id) == str(ATTO)
     assert_solvent(world.c)
 
 
@@ -288,7 +291,8 @@ def test_slash_is_capped_by_free_capital(world):
     claim_id = world.file(policy_id=pid)
     world.appeal(claim_id, bond=c.required_appeal_bond(claim_id))
     remaining = c.get_provider(world.provider_id)["free_capital"]
-    at(vm, MAX_DOWNTIME)
+    world.sample(claim_id, "DDD")
+    at(vm, WINDOW_CLOSED)
     c.resolve_appeal(claim_id)
     claim = c.get_claim(claim_id)
     assert claim["status"] == "CONFIRMED"
@@ -356,17 +360,19 @@ def test_validators_disagree_when_they_observe_a_different_state(world):
     world.file()
     # The validator re-probes the endpoint independently: seeing the same
     # outage it agrees; seeing a healthy target it rejects the leader.
-    assert world.vm.run_validator() is True
+    # (index 0 is the probe; index 1 is the LLM triage that follows it.)
+    assert world.vm.run_validator(index=0) is True
     endpoint_healthy(world.vm)
-    assert world.vm.run_validator() is False
+    assert world.vm.run_validator(index=0) is False
 
 
 def test_validators_reject_malformed_leader_results(world):
     endpoint_down(world.vm)
     world.file()
-    assert world.vm.run_validator(leader_result={"up": False, "code": "HTTP_503"}) is True
+    assert world.vm.run_validator(index=0, leader_result={"state": "DOWN", "code": "HTTP_503"}) is True
     # A leader claiming "down" while labelling the code UP is inconsistent.
-    assert world.vm.run_validator(leader_result={"up": False, "code": "UP"}) is False
-    assert world.vm.run_validator(leader_result={"up": "no", "code": "HTTP_503"}) is False
-    assert world.vm.run_validator(leader_result=json.dumps({"up": False})) is False
-    assert world.vm.run_validator(leader_error=Exception("leader crashed")) is False
+    assert world.vm.run_validator(index=0, leader_result={"state": "DOWN", "code": "UP"}) is False
+    assert world.vm.run_validator(index=0, leader_result={"state": "DOWN", "code": "HTTP_429"}) is False
+    assert world.vm.run_validator(index=0, leader_result={"state": "no", "code": "HTTP_503"}) is False
+    assert world.vm.run_validator(index=0, leader_result=json.dumps({"state": "DOWN"})) is False
+    assert world.vm.run_validator(index=0, leader_error=Exception("leader crashed")) is False

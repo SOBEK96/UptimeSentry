@@ -29,6 +29,20 @@ APPEAL_BOND = 2 * ATTO
 
 TRACE = "POST eth_blockNumber -> HTTP 503 Service Unavailable after 3 retries (10s timeout)"
 
+RESOLUTION_WINDOW = 2 * 3600
+SAMPLE_INTERVAL = 600
+WINDOW_CLOSED = MAX_DOWNTIME + RESOLUTION_WINDOW + 1  # confirmation window closed (seconds after T0)
+
+# LLM answers as a model returns them: JSON inside prose. (The gltest harness
+# auto-parses bare JSON mocks into dicts, which the SDK's text channel rejects.)
+def llm_answer(category: str, rationale: str) -> str:
+    return "Classification: " + json.dumps({"category": category, "rationale": rationale})
+
+
+TRIAGE_A = llm_answer("A", "The trace describes the provider returning 503 errors.")
+TRIAGE_B = llm_answer("B", "The trace describes the reporter's own expired API key.")
+TRIAGE_INCONCLUSIVE = llm_answer("INCONCLUSIVE", "The trace does not describe the failure.")
+
 T0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
 
@@ -49,9 +63,11 @@ def call_with_value(direct_vm, value: int, fn, *args):
         direct_vm.value = 0
 
 
-def clear_responses(direct_vm) -> None:
-    """Drop every pinned response; unpinned URLs behave as unreachable."""
+def clear_responses(direct_vm, triage: str = TRIAGE_A) -> None:
+    """Drop every pinned response (unpinned URLs behave as unreachable) and pin
+    the LLM triage answer the filing step will receive."""
     direct_vm.clear_mocks()
+    direct_vm.mock_llm(r".*incident triage.*", triage)
 
 
 def pin_response(direct_vm, url: str, method: str, status: int, body: str) -> None:
@@ -59,18 +75,18 @@ def pin_response(direct_vm, url: str, method: str, status: int, body: str) -> No
     direct_vm.mock_web(rf"^{url}$", {"method": method, "status": status, "body": body})
 
 
-def endpoint_healthy(direct_vm, url: str = ENDPOINT) -> None:
-    clear_responses(direct_vm)
+def endpoint_healthy(direct_vm, url: str = ENDPOINT, triage: str = TRIAGE_A) -> None:
+    clear_responses(direct_vm, triage)
     pin_response(direct_vm, url, "POST", 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": "0x14a8c3f"}))
 
 
-def endpoint_down(direct_vm, url: str = ENDPOINT, status: int = 503) -> None:
-    clear_responses(direct_vm)
+def endpoint_down(direct_vm, url: str = ENDPOINT, status: int = 503, triage: str = TRIAGE_A) -> None:
+    clear_responses(direct_vm, triage)
     pin_response(direct_vm, url, "POST", status, "upstream unavailable")
 
 
-def endpoint_rpc_error(direct_vm, url: str = ENDPOINT) -> None:
-    clear_responses(direct_vm)
+def endpoint_rpc_error(direct_vm, url: str = ENDPOINT, triage: str = TRIAGE_A) -> None:
+    clear_responses(direct_vm, triage)
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": "header not found"}})
     pin_response(direct_vm, url, "POST", 200, body)
 
@@ -133,6 +149,15 @@ class World:
             args["probe_payload"],
             args["failure_trace"],
         )
+
+    def sample(self, claim_id: str, states: str) -> None:
+        """Record confirmation samples at 10-minute steps from the start of the
+        confirmation window. `states` is a string of 'D' (503) / 'U' (healthy)."""
+        self.vm.sender = self.watchdog
+        for i, state in enumerate(states):
+            at(self.vm, MAX_DOWNTIME + i * SAMPLE_INTERVAL)
+            (endpoint_down if state == "D" else endpoint_healthy)(self.vm)
+            self.c.confirm_outage(claim_id)
 
     def appeal(self, claim_id: str, bond: int = APPEAL_BOND, who=None) -> None:
         self.vm.sender = who if who is not None else self.provider_owner

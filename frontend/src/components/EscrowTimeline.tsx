@@ -9,6 +9,7 @@ const TONE: Record<Claim["status"], { track: string; text: string; dot: string }
   CONFIRMED: { track: "bg-emerald-400", text: "text-emerald-300", dot: "border-emerald-400" },
   PAID: { track: "bg-emerald-400", text: "text-emerald-300", dot: "border-emerald-400" },
   DISMISSED: { track: "bg-rose-400", text: "text-rose-300", dot: "border-rose-400" },
+  RECOVERED: { track: "bg-rose-400", text: "text-rose-300", dot: "border-rose-400" },
 };
 
 // The claim's escrow on a time axis: filing, the provider's allowed downtime
@@ -20,16 +21,24 @@ export function EscrowTimeline({ claim, now }: { claim: Claim; now: number }) {
   const pct = (t: number) => `${frac(t) * 100}%`;
   const tone = TONE[claim.status];
   const locked = claim.status === "UNDER_APPEAL";
-  const settled = claim.status === "PAID" || claim.status === "DISMISSED" || claim.status === "CONFIRMED";
+  const settled = claim.status === "PAID" || claim.status === "DISMISSED" || claim.status === "RECOVERED" || claim.status === "CONFIRMED";
+  const closes = claim.confirmation_closes ?? claim.confirm_after;
+  const samples = claim.samples_total ? ` ${claim.samples_down}/${claim.samples_total} samples DOWN so far.` : "";
   const windowClosed = now >= claim.challenge_deadline;
 
   let caption: string;
+  const sampling = now >= claim.confirm_after && now <= closes;
   if (claim.status === "CLAIM_PENDING")
-    caption = windowClosed ? "Challenge window closed. The payout can be released." : `Payout releases in ${formatDuration(claim.challenge_deadline - now)} unless appealed.`;
+    caption = sampling
+      ? `Confirmation window open for ${formatDuration(closes - now)}: record samples to prove the outage is sustained.${samples}`
+      : windowClosed && now > closes
+        ? `Ready to settle: ${claim.outcome === "SUSTAINED" ? "sustained outage, the payout can be released" : "outage not sustained, the claim will close as recovered"}.`
+        : `Payout needs a DOWN majority of samples taken after the allowed downtime, then the challenge deadline.${samples}`;
   else if (locked)
-    caption = now >= claim.confirm_after ? "Escrow locked. The downtime window has elapsed, so the appeal can be ruled on." : `Escrow locked. Ruling opens in ${formatDuration(claim.confirm_after - now)}.`;
+    caption = now > closes ? "Escrow locked. The confirmation window has closed, so the appeal can be ruled on." : `Escrow locked until the appeal is ruled on after ${formatTime(closes)}.${samples}`;
   else if (claim.status === "CONFIRMED") caption = "Breach confirmed by consensus. Payout ready for the insured.";
-  else if (claim.status === "DISMISSED") caption = "Target recovered within the SLA window. Claim dismissed.";
+  else if (claim.status === "DISMISSED") caption = "Outage not sustained across the confirmation window. Claim dismissed.";
+  else if (claim.status === "RECOVERED") caption = "Endpoint recovered before the outage became an SLA breach. No payout; escrow returned.";
   else caption = `Paid out ${formatTime(claim.resolved_at || claim.challenge_deadline)}.`;
 
   return (
@@ -63,7 +72,7 @@ export function EscrowTimeline({ claim, now }: { claim: Claim; now: number }) {
           <span className="text-zinc-300">{formatTime(claim.filed_at)}</span>
         </span>
         <span className="absolute hidden -translate-x-1/2 text-center sm:block" style={{ left: pct(claim.confirm_after) }}>
-          downtime window ends
+          confirmation window
           <br />
           <span className="text-zinc-300">{formatTime(claim.confirm_after)}</span>
         </span>

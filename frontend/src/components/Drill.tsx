@@ -23,6 +23,7 @@ const VERDICT: Record<DrillResult["verdict"], { kind: Line["kind"]; text: string
   REJECTED_TARGET_HEALTHY: { kind: "ok", text: "REJECTED_TARGET_HEALTHY: target answered correctly; a report filed now reverts" },
   REJECTED_POLICY_NOT_ACTIVE: { kind: "warn", text: "REJECTED_POLICY_NOT_ACTIVE: policy expired, paid, or already has an open claim" },
   REJECTED_UNBOUND_EVIDENCE: { kind: "err", text: "REJECTED_UNBOUND_EVIDENCE: target differs from the registered endpoint/payload" },
+  REJECTED_RATE_LIMITED: { kind: "warn", text: "REJECTED_RATE_LIMITED: the endpoint answered 429/403; rate limits are not evidence of an outage" },
 };
 
 const stamp = () => new Date().toISOString().slice(11, 19);
