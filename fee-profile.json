@@ -1,12 +1,12 @@
 {
   "version": 1,
   "network": "studio_devnet",
-  "measuredAt": "2026-09-23T07:02:10Z",
+  "measuredAt": "2026-09-23T11:13:44Z",
   "chainId": 61997,
   "deploy": {
     "leaderTimeunitsAllocation": "125",
     "validatorTimeunitsAllocation": "250",
-    "executionBudgetPerRound": "98681250000000",
+    "executionBudgetPerRound": "98811562500000",
     "totalMessageFees": "0",
     "rotationsPerRound": "0"
   },
@@ -14,23 +14,23 @@
     "attest_probe": {
       "leaderTimeunitsAllocation": "125",
       "validatorTimeunitsAllocation": "250",
-      "executionBudgetPerRound": "98360937500000",
+      "executionBudgetPerRound": "98385937500000",
       "totalMessageFees": "0",
-      "rotationsPerRound": "3"
+      "rotationsPerRound": "1"
     },
-    "deposit_underwriting": {
+    "purchase_coverage": {
       "leaderTimeunitsAllocation": "125",
       "validatorTimeunitsAllocation": "250",
-      "executionBudgetPerRound": "98286875000000",
+      "executionBudgetPerRound": "98292187500000",
       "totalMessageFees": "0",
-      "rotationsPerRound": "3"
+      "rotationsPerRound": "1"
     },
     "register_provider": {
       "leaderTimeunitsAllocation": "125",
       "validatorTimeunitsAllocation": "250",
-      "executionBudgetPerRound": "98293750000000",
+      "executionBudgetPerRound": "98294062500000",
       "totalMessageFees": "0",
-      "rotationsPerRound": "3"
+      "rotationsPerRound": "1"
     }
   }
 }

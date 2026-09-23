@@ -2,59 +2,53 @@
   "network": "studio-next",
   "chain_id": 61997,
   "rpc_url": "https://studio-next.genlayer.com/api",
-  "explorer_url": "https://explorer-studio-next.genlayer.com/address/0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E",
-  "contract_address": "0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E",
-  "deploy_tx": "0xadc9275b08292460943355a7c0242fa3aeaa1a8e87fc4c22e0371dd834999ee1",
+  "explorer_url": "https://explorer-studio-next.genlayer.com/address/0xd21347E2516532b036Ae00b2152466f73b7b5E7f",
+  "contract_address": "0xd21347E2516532b036Ae00b2152466f73b7b5E7f",
+  "deploy_tx": "0x382940d10b0cc52c03d64cce7edb1e4df7092fd2a2f1516c7f0b91ccdd82e3fc",
   "deployer": "0x0D50d1126385D0e934D25C5Fd3eD68C1F61bc1d3",
-  "deployed_at": "2026-09-23T05:43:15Z",
+  "deployed_at": "2026-09-23T11:05:29Z",
   "source": "contracts/uptimesentry.py",
-  "source_sha256": "d1a669db5d9ca4996fb2121cda6991654ddc7bd1a96a4e556a634c67be1f5e4b",
-  "onchain_code_sha256": "d1a669db5d9ca4996fb2121cda6991654ddc7bd1a96a4e556a634c67be1f5e4b",
+  "source_sha256": "ba922b172036842a672fcbe9f30e51509b3090db5dd2c58cb683a9b80e637a5e",
+  "onchain_code_sha256": "ba922b172036842a672fcbe9f30e51509b3090db5dd2c58cb683a9b80e637a5e",
   "runner": "py-genlayer:5jycge4q8k23462jtb0b9fyey1s9qz928sz2nbrd9mg4sxqg2qng",
+  "revision": "hardened: rate-limit indeterminate probes, sampled confirmation window, withdrawal timelock, SSRF rules, LLM triage",
+  "previous": "deployments/studio-next.v1.json",
   "smoke_test": {
-    "run_at": "2026-09-23T06:12:30Z",
-    "signer": "0x0D50d1126385D0e934D25C5Fd3eD68C1F61bc1d3",
+    "run_at": "2026-09-23T11:30:00Z",
+    "script": "scripts/bootstrap_live.py",
     "transactions": [
       {
         "method": "register_provider",
-        "tx": "0x2ea7108b763c066242b93e9a4d1c68607d158a745a8467c0f71fc42b07c402d9",
+        "tx": "0x170d78a45b496bb17953dae56c2a6859e33ed8e6cc923b0def25d5a95d2d80aa",
+        "signer": "0x72548D2EDE9A53C33E3cEdA23cFda7bB3D707fDf",
         "value_wei": "10000000000000000000",
-        "status": "FINALIZED"
+        "result": "MAJORITY_AGREE / FINISHED_WITH_RETURN"
+      },
+      {
+        "method": "purchase_coverage",
+        "tx": "0xf877d2fce0aad51f80c9576ef36b8fa4171f4bcc11f45497defdfd18c39ea20e",
+        "signer": "0x1896704C1e48ba4Dd891fC9A783c503caab074Fc",
+        "result": "MAJORITY_AGREE / FINISHED_WITH_RETURN"
       },
       {
         "method": "attest_probe",
-        "tx": "0x5d247731a10a873c4764403edb1a9b9541cfe0fe7dfa09cd47261c32bcbddcbf",
+        "tx": "0xf3fd27ef3e7620443e5b63e488dc353c74022bf74c9073db73ca5fdf31edfe18",
+        "signer": "0x72548D2EDE9A53C33E3cEdA23cFda7bB3D707fDf",
         "value_wei": "0",
-        "status": "FINALIZED"
-      },
-      {
-        "method": "deposit_underwriting",
-        "tx": "0xd48896650a3083e8bec69b97b67718695b3325e5de66514245c8d594919ac37e",
-        "value_wei": "500000000000000000",
-        "status": "ACCEPTED",
-        "note": "console redesign write-path verification (value + fee deposit)"
-      },
-      {
-        "method": "attest_probe",
-        "tx": "0xfbd0ab650b14358508a03b61f8cf8043845c14db408deb1e05d741e16e70f476",
-        "value_wei": "0",
-        "status": "FINALIZED",
-        "note": "scripts/smoke_test.py --write (faucet-funded throwaway signer); consensus observed UP"
+        "result": "MAJORITY_AGREE / FINISHED_WITH_RETURN",
+        "observed": "UP"
       }
     ],
     "provider": {
       "provider_id": "0xda1e4a0b726081a615f3a070f91579a54a9a7deb",
       "name": "Base Mainnet Public RPC",
       "endpoint_url": "https://mainnet.base.org",
-      "probe_payload": "{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[]}",
       "underwriting_wei": "10000000000000000000"
     },
-    "observed": {
-      "last_probe_code": "UP",
-      "probes_total": 1,
-      "probes_up": 1,
-      "observed_availability_bps": 10000,
-      "solvent": true
+    "drill": {
+      "method": "run_sla_drill (write simulation)",
+      "verdict": "REJECTED_TARGET_HEALTHY",
+      "live_probe": "UP"
     }
   }
 }

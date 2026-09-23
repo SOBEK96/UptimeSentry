@@ -26,5 +26,6 @@
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   },
-  "description": "Operator console for the UptimeSentry SLA insurance protocol on GenLayer"
+  "description": "Operator console for the UptimeSentry SLA insurance protocol on GenLayer",
+  "license": "MIT"
 }

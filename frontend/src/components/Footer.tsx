@@ -42,7 +42,7 @@ export function Footer() {
       </div>
 
       <div className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-900 pt-5 text-xs text-zinc-600">
-        <span>Apache-2.0 / MIT open source protocol</span>
+        <span>MIT licensed · © 2026 SOBEK96</span>
         <span>Figures are read from the contract. Latency is measured from your browser. Payouts, premiums and bonds are native GEN.</span>
       </div>
     </footer>

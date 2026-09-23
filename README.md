@@ -4,29 +4,76 @@ Parametric SLA insurance for public RPC and API endpoints, adjudicated on-chain 
 
 Infrastructure providers underwrite their own public endpoints with native GEN. Protocols and teams that depend on those endpoints buy fully collateralised coverage. When an endpoint goes down, anyone can report it. GenLayer validators independently probe the **registered** endpoint with the **registered** payload, and the protocol pays out, slashes and refunds based on what they observe, not on what anyone claims.
 
-## Deployment
+UptimeSentry is a GenLayer **Intelligent Contract**. It combines four things no oracle-fed insurance contract can:
 
-| | |
-| --- | --- |
-| Network | GenLayer Studio Next (chain 61997) |
-| Contract | [`0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E`](https://explorer-studio-next.genlayer.com/address/0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E) |
-| Deploy tx | `0xadc9275b08292460943355a7c0242fa3aeaa1a8e87fc4c22e0371dd834999ee1` |
-| Record | [`deployments/studio-next.json`](deployments/studio-next.json) (on-chain code sha256 matches `contracts/uptimesentry.py`) |
-| Smoke test | `register_provider` for `https://mainnet.base.org` with 10 GEN (`0x2ea7108b…02d9`), then `attest_probe`: validators agreed the endpoint is `UP` (`0x5d247731…ddcbf`) |
+- **Live probes under consensus:** validators probe the endpoint themselves and must agree on what they see.
+- **Parametric settlement:** a claim is decided by a sustained-outage rule over those observations.
+- **LLM triage:** a language model reviews every incident report.
+- **Game-theoretic bonds:** reporters, appellants and providers all put GEN at risk.
+
+## Verified contracts
+
+| Deployment | Address | Status |
+| --- | --- | --- |
+| **Studio Next** (chain 61997), current | [`0xd21347E2516532b036Ae00b2152466f73b7b5E7f`](https://explorer-studio-next.genlayer.com/address/0xd21347E2516532b036Ae00b2152466f73b7b5E7f) | Hardened contract. On-chain source sha256 `ba922b17…37a5e` matches `contracts/uptimesentry.py` byte for byte. Record: [`deployments/studio-next.json`](deployments/studio-next.json) |
+| Studio Next, v1 | [`0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E`](https://explorer-studio-next.genlayer.com/address/0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E) | Superseded (pre security review). Record: [`deployments/studio-next.v1.json`](deployments/studio-next.v1.json) |
+
+Live activity on the current contract, all finalized with `MAJORITY_AGREE` (validator consensus). Reproduce with `scripts/bootstrap_live.py`.
+
+| Call | Transaction | Result |
+| --- | --- | --- |
+| `register_provider` (`https://mainnet.base.org`, 10 GEN pool) | [`0x170d78a4…80aa`](https://explorer-studio-next.genlayer.com/tx/0x170d78a45b496bb17953dae56c2a6859e33ed8e6cc923b0def25d5a95d2d80aa) | Provider `0xda1e4a0b…7deb` |
+| `purchase_coverage` (1 GEN, 30 days) | [`0xf877d2fc…a20e`](https://explorer-studio-next.genlayer.com/tx/0xf877d2fce0aad51f80c9576ef36b8fa4171f4bcc11f45497defdfd18c39ea20e) | Policy `…0001` |
+| `attest_probe` | [`0xf3fd27ef…fe18`](https://explorer-studio-next.genlayer.com/tx/0xf3fd27ef3e7620443e5b63e488dc353c74022bf74c9073db73ca5fdf31edfe18) | Validators agreed: `UP` |
+| `run_sla_drill` (write simulation) | none (not committed) | `REJECTED_TARGET_HEALTHY`, live probe `UP` |
+
+## Repository
 
 ```
 contracts/uptimesentry.py      Intelligent contract (GenVM, py-genlayer runner 5jycge4…)
-specs/architecture.md          Protocol specification: binding, lifecycle, escrow, game theory
-tests/direct/                  Direct-mode suite (gltest), 100% line coverage of the contract
+specs/architecture.md          Protocol specification: binding, lifecycle, escrow, game theory, limitations
+tests/direct/                  50 direct-mode tests incl. security-review PoCs; 100% line coverage
 tests/integration/             Full-consensus suite (gltest) for Studio Next / genlayer up
 scripts/deploy.py              Deploy → verify on-chain source → record deployments/*.json
+scripts/bootstrap_live.py      Seed a deployment with live provider, policy, probe and drill
 scripts/smoke_test.py          Live smoke test of the recorded deployment
 scripts/fee_profile.py         Builds fee-profile.json from finalized receipts
-deployments/studio-next.json   Deployment and smoke-test record
-fee-profile.json               Fee observations measured on Studio Next
+deployments/                   Deployment and smoke-test records
 frontend/                      Operator console (Vite + React + Tailwind + genlayer-js)
 Makefile                       install · lint · test · smoke · deploy · profile · build
 ```
+
+## Security hardening
+
+These are the results of a security review. Each finding has a proof-of-concept test in [`tests/direct/test_review_poc.py`](tests/direct/test_review_poc.py).
+
+| Threat | Defence |
+| --- | --- |
+| Faking an outage by getting validators rate-limited | HTTP 429 and 403 are *indeterminate*, never DOWN. Filing, sampling and probing fail closed with `ERR_RATE_LIMITED: endpoint returned 429/403, cannot determine outage` |
+| One momentary outage paying out | Two-stage confirmation. The filing probe must see DOWN, then at least 3 consensus samples in the window `[confirm_after, confirm_after + 2h]` (10 min apart, via `confirm_outage`) must be mostly DOWN. Otherwise the claim closes as `RECOVERED` and the escrow returns to the pool |
+| A provider draining capital as an outage starts | Two-step withdrawal: `request_underwriting_withdrawal`, then `execute_underwriting_withdrawal` after a 24h timelock with no open claims. Queued capital stays slashable until it leaves |
+| A caller picking a favourable moment for the ruling | `resolve_appeal` opens only after the sampling window and runs no probe. The ruling is a pure function of the recorded samples |
+| SSRF against validators | Only public domain names on port 443. Every IP literal is rejected (hex, octal, short and IPv6 forms), as are wildcard-DNS rebinding hosts (`nip.io`, `sslip.io`, `localtest.me`…), `*.localhost`, internal suffixes and credentials in the URL |
+| Evidence aimed at a different target | Evidence must name the exact registered URL and probe payload, or the filing fails with `ERR_UNBOUND_EVIDENCE` |
+| Spam and delay tactics | Reporter bonds double with each open claim. Appeal bonds double with each dispute against the same provider within 7 days |
+
+The known limitations are rate-limit starvation and DNS rebinding after registration. Both are documented in [`specs/architecture.md` §9](specs/architecture.md#9-known-limitations).
+
+## GenVM-native LLM triage
+
+Every filing runs `gl.nondet.exec_prompt` after validators have confirmed the target is failing. The model classifies the reporter's `failure_trace` against the failure code the contract itself observed:
+
+- **UPSTREAM_OUTAGE:** the trace describes the provider failing.
+- **CLIENT_SIDE_ARTIFACT:** the trace describes the reporter's own problem, such as credentials, quota or a malformed request. The filing is rejected with `ERR_CLIENT_SIDE_ARTIFACT`.
+- **INCONCLUSIVE:** the filing proceeds.
+
+Validators run the prompt independently and must agree on the category. The verdict and a one-sentence rationale are stored on the claim and included in its evidence hash.
+
+The model is deliberately fenced so it cannot be turned against either side:
+
+- **Inputs:** only contract-observed facts and the reporter's own text. The endpoint's response headers and body are provider-controlled and are never sent, so a provider cannot inject instructions that block claims against itself.
+- **Untrusted text:** the reporter's trace is sanitised and delimited as untrusted data.
+- **Limited power:** the model can only reject a reporter's self-described problem. It never creates or enlarges a payout.
 
 ## How it works
 
@@ -180,3 +227,20 @@ npm run build
 - `VITE_GENLAYER_RPC_URL` and `VITE_GENLAYER_EXPLORER_URL`: optional RPC and explorer overrides.
 
 The console needs `genlayer-js` 2.x: the runner rejects the 1.x call encoding with `malformed_entry`. `vercel.json` builds `frontend/` and serves `frontend/dist`.
+
+## Reproduce locally
+
+```bash
+make install                                        # .venv (exact pins) + frontend packages
+make lint                                           # genvm-lint lint + validate: 0 errors, 0 warnings
+make test                                           # 50 direct tests, then the integration suite
+.venv/bin/python -m pytest tests/direct -q          # direct suite only
+genvm-lint lint contracts/uptimesentry.py
+genvm-lint validate contracts/uptimesentry.py
+make smoke                                          # read-only check of the live deployment
+```
+
+## License
+
+[MIT](LICENSE) © 2026 SOBEK96
+
