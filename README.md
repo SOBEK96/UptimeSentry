@@ -15,11 +15,12 @@ UptimeSentry is a GenLayer **Intelligent Contract**. It combines four things no 
 
 | Deployment | Address | Status |
 | --- | --- | --- |
-| **Studio Next** (chain 61997), current | [`0x23474374a1B493a1fEe91075a932BcaaCbF6013B`](https://explorer-studio-next.genlayer.com/address/0x23474374a1B493a1fEe91075a932BcaaCbF6013B) | Round-2 hardened contract. On-chain source sha256 `a0aea60c…d5656` matches `contracts/uptimesentry.py` byte for byte. Deploy tx [`0x30b96f42…8d9b`](https://explorer-studio-next.genlayer.com/tx/0x30b96f42a6674df9355c8a52a175891487b3ec3621d3549441fd8f78ca218d9b). Record: [`deployments/studio-next.json`](deployments/studio-next.json) |
+| **Studio Next** (chain 61997), current | [`0x4d580Dc355510e170529473906A455f51610F405`](https://explorer-studio-next.genlayer.com/address/0x4d580Dc355510e170529473906A455f51610F405) | Round-2 hardened contract. On-chain source sha256 `a0aea60c…d5656` matches `contracts/uptimesentry.py` byte for byte. Deploy tx [`0x2af0aebd…f16d`](https://explorer-studio-next.genlayer.com/tx/0x2af0aebd25f0fd7af132ef24a902ee683ba48fcf58318bcdec99161cfe95f16d). Record: [`deployments/studio-next.json`](deployments/studio-next.json) |
+| Studio Next, v3 | [`0x23474374a1B493a1fEe91075a932BcaaCbF6013B`](https://explorer-studio-next.genlayer.com/address/0x23474374a1B493a1fEe91075a932BcaaCbF6013B) | Superseded; identical source to the current contract. Record: [`deployments/studio-next.v3.json`](deployments/studio-next.v3.json) |
 | Studio Next, v2 | [`0xd21347E2516532b036Ae00b2152466f73b7b5E7f`](https://explorer-studio-next.genlayer.com/address/0xd21347E2516532b036Ae00b2152466f73b7b5E7f) | Superseded (round-1 hardening). Record: [`deployments/studio-next.v2.json`](deployments/studio-next.v2.json) |
 | Studio Next, v1 | [`0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E`](https://explorer-studio-next.genlayer.com/address/0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E) | Superseded (pre-review). Record: [`deployments/studio-next.v1.json`](deployments/studio-next.v1.json) |
 
-Live activity on the current contract, all finalized with `MAJORITY_AGREE` (validator consensus). Reproduce with `scripts/bootstrap_live.py`.
+Live activity on v3 (`0x23474374…013B`), which runs the identical source. All calls finalized with `MAJORITY_AGREE` (validator consensus). The current contract is freshly deployed and empty; `scripts/bootstrap_live.py` seeds it the same way.
 
 | Call | Transaction | Result |
 | --- | --- | --- |

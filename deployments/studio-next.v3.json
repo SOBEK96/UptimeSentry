@@ -1,0 +1,58 @@
+{
+  "network": "studio-next",
+  "chain_id": 61997,
+  "rpc_url": "https://studio-next.genlayer.com/api",
+  "explorer_url": "https://explorer-studio-next.genlayer.com/address/0x23474374a1B493a1fEe91075a932BcaaCbF6013B",
+  "contract_address": "0x23474374a1B493a1fEe91075a932BcaaCbF6013B",
+  "deploy_tx": "0x30b96f42a6674df9355c8a52a175891487b3ec3621d3549441fd8f78ca218d9b",
+  "deployer": "0x72548D2EDE9A53C33E3cEdA23cFda7bB3D707fDf",
+  "deployed_at": "2026-09-23T11:38:46Z",
+  "source": "contracts/uptimesentry.py",
+  "source_sha256": "a0aea60c4676537d1975253b4df9232269daa69285ee7c0e3c397d3895cd5656",
+  "onchain_code_sha256": "a0aea60c4676537d1975253b4df9232269daa69285ee7c0e3c397d3895cd5656",
+  "runner": "py-genlayer:5jycge4q8k23462jtb0b9fyey1s9qz928sz2nbrd9mg4sxqg2qng",
+  "revision": "round-2 hardening: withdrawal probe + 48h expiry, advisory LLM triage, insufficient-sample refunds",
+  "previous": [
+    "deployments/studio-next.v2.json",
+    "deployments/studio-next.v1.json"
+  ],
+  "smoke_test": {
+    "run_at": "2026-09-23T13:10:00Z",
+    "script": "scripts/bootstrap_live.py",
+    "transactions": [
+      {
+        "method": "register_provider",
+        "tx": "0x5d28adcfa579a1ced16b70df4b63f8ffa46d9b48afb7030c05f0617fcc524527",
+        "signer": "0x72548D2EDE9A53C33E3cEdA23cFda7bB3D707fDf",
+        "value_wei": "10000000000000000000",
+        "result": "MAJORITY_AGREE / FINISHED_WITH_RETURN"
+      },
+      {
+        "method": "purchase_coverage",
+        "tx": "0x5ed1235e72afc93cb7f398452428a675cb6a86aa1bf1c43894c16e70d828bc52",
+        "signer": "0x1896704C1e48ba4Dd891fC9A783c503caab074Fc",
+        "result": "MAJORITY_AGREE / FINISHED_WITH_RETURN"
+      },
+      {
+        "method": "attest_probe",
+        "tx": "0xcd3e6e6d24d6c2bec70c90a667bbfa76b5d6eec8a3b7215e3d80f8895d9f5d3a",
+        "signer": "0x72548D2EDE9A53C33E3cEdA23cFda7bB3D707fDf",
+        "value_wei": "0",
+        "result": "MAJORITY_AGREE / FINISHED_WITH_RETURN",
+        "observed": "UP"
+      }
+    ],
+    "provider": {
+      "provider_id": "0xda1e4a0b726081a615f3a070f91579a54a9a7deb",
+      "name": "Base Mainnet Public RPC",
+      "endpoint_url": "https://mainnet.base.org",
+      "underwriting_wei": "10000000000000000000"
+    },
+    "drill": {
+      "method": "run_sla_drill (write simulation)",
+      "verdict": "REJECTED_TARGET_HEALTHY",
+      "live_probe": "UP"
+    }
+  },
+  "note": "v3: same source as the current deployment; superseded by 0x4d580Dc355510e170529473906A455f51610F405. Its smoke_test is the live evidence for this source."
+}
