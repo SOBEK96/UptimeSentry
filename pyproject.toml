@@ -1,0 +1,5 @@
+[project]
+name = "uptimesentry"
+version = "1.0.0"
+description = "Parametric SLA insurance and downtime adjudication on GenLayer"
+requires-python = ">=3.12"

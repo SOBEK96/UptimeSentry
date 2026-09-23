@@ -1,0 +1,20 @@
+# Development and test dependencies for UptimeSentry.
+# Install with: make install   (or: pip install -r requirements-dev.txt)
+#
+# The GenLayer tools are one release-candidate set and move together:
+# genlayer-test drives direct mode and gltest, genlayer-py is the client the
+# integration suite and scripts/ talk to the network with, and genvm-linter is
+# the VM's own linter. Pinned exactly: the pinned contract runner (5jycge4)
+# needs genlayer-test 0.30.0rc2, and older releases fail with
+# "unexpected end of memory" when loading it.
+genlayer-test==0.30.0rc2
+genlayer-py==0.19.0rc2
+genvm-linter==0.11.1rc2
+
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+
+# Signing and RPC for scripts/deploy.py and scripts/smoke_test.py.
+web3==8.0.0
+eth-account==0.14.0

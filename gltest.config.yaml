@@ -1,0 +1,32 @@
+# gltest configuration for the UptimeSentry integration suite (tests/integration).
+#
+#   localnet       GLSim (`make sim`, no Docker) or `genlayer up` on port 4000.
+#                  Accounts are generated and funded by the simulator.
+#   studio_devnet  GenLayer Studio Next, chain 61997: the network the contract is
+#                  deployed on (deployments/studio-next.json). Fee-charging, so
+#                  every deploy and write carries a quoted fee distribution; the
+#                  test accounts must hold GEN there.
+#
+# Select with --network; the Makefile's NETWORK variable does it for you.
+networks:
+  default: localnet
+
+  localnet:
+    url: "http://127.0.0.1:4000/api"
+    chain_type: localnet
+    default_wait_interval: 3000
+    default_wait_retries: 120
+
+  studio_devnet:
+    # genlayer-py's preset points at studio-dev.genlayer.com; both hostnames
+    # serve chain 61997, and the deployment record and explorer use studio-next.
+    url: "https://studio-next.genlayer.com/api"
+    chain_type: studio_devnet
+    default_wait_interval: 4000
+    default_wait_retries: 90
+
+paths:
+  contracts: "contracts"
+  artifacts: "artifacts"
+
+environment: .env
