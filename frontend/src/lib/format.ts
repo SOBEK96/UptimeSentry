@@ -62,3 +62,12 @@ export function formatTime(unix: number): string {
 export function sameAddr(a: string | null | undefined, b: string | null | undefined): boolean {
   return !!a && !!b && a.toLowerCase() === b.toLowerCase();
 }
+
+export function ago(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 172_800) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86_400)}d ago`;
+}

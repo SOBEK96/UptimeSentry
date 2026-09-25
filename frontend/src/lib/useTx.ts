@@ -3,16 +3,38 @@ import { toast } from "sonner";
 import { write, type WriteArgs } from "./contract";
 import { explainError } from "./errors";
 import { EXPLORER_URL } from "./network";
+import { demo, DEMO_ACCOUNT } from "./demo";
 
 /** Runs a contract write with a single toast that follows it through
  * wallet confirmation, consensus and the outcome. */
 export function useTx(account: `0x${string}` | null, onSettled: () => void) {
   const [busy, setBusy] = useState(false);
 
+  // Guest mode: the same contract rules run against sample state in the browser.
+  const runDemo = useCallback(
+    async (label: string, fn: string, args: WriteArgs, value: bigint): Promise<boolean> => {
+      setBusy(true);
+      const id = toast.loading(label, { description: "Simulating validator consensus (guest mode)…" });
+      try {
+        const hash = await demo.write(DEMO_ACCOUNT, fn, args, value);
+        toast.success(label, { id, description: `Simulated · ${hash.slice(0, 10)}… · nothing was signed or sent` });
+        onSettled();
+        return true;
+      } catch (err) {
+        toast.error(`${label} rejected`, { id, description: explainError(err) });
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onSettled],
+  );
+
   const run = useCallback(
     async (label: string, fn: string, args: WriteArgs, value: bigint = 0n): Promise<boolean> => {
+      if (demo.get().active) return runDemo(label, fn, args, value);
       if (!account) {
-        toast.error("Connect a wallet first.");
+        toast.error("Connect a wallet first.", { description: "Or choose “Try as Studio guest” to explore with simulated transactions." });
         return false;
       }
       setBusy(true);
@@ -40,7 +62,7 @@ export function useTx(account: `0x${string}` | null, onSettled: () => void) {
         setBusy(false);
       }
     },
-    [account, onSettled],
+    [account, onSettled, runDemo],
   );
 
   return { run, busy };

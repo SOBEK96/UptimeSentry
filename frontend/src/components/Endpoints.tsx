@@ -17,6 +17,7 @@ interface Props {
   onAddCapital: (p: Provider, amount: bigint) => Promise<boolean>;
   onFileIncident: (p: Provider) => void;
   onGoUnderwrite: () => void;
+  onExplore?: () => void;
 }
 
 export function Endpoints(props: Props) {
@@ -24,7 +25,14 @@ export function Endpoints(props: Props) {
     return (
       <Empty title="No endpoints are underwritten yet.">
         <p className="max-w-sm text-sm text-zinc-500">Lock GEN behind a public RPC or health endpoint to start selling SLA coverage against it.</p>
-        <Button onClick={props.onGoUnderwrite}>Underwrite an endpoint</Button>
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button onClick={props.onGoUnderwrite}>Underwrite an endpoint</Button>
+          {props.onExplore && (
+            <Button variant="ghost" onClick={props.onExplore}>
+              Explore with sample telemetry
+            </Button>
+          )}
+        </div>
       </Empty>
     );
   }

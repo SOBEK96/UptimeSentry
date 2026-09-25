@@ -3,7 +3,8 @@ import { TransactionStatus, type TransactionHash } from "genlayer-js/types";
 import type { Claim, DrillResult, Policy, Provider, ProtocolStats } from "./types";
 import { CHAIN, CONTRACT_ADDRESS } from "./network";
 import { toBig, toNum } from "./format";
-import { withRetry, type RetryOptions } from "./rpc";
+import { withRetry, withTimeout, type RetryOptions } from "./rpc";
+import { demo } from "./demo";
 
 type Plain = Record<string, unknown>;
 
@@ -75,7 +76,7 @@ const simulator = createClient({ chain: CHAIN, account: createAccount(generatePr
 type Arg = string | number | bigint | boolean;
 
 function read(functionName: string, args: Arg[] = [], retry?: RetryOptions): Promise<unknown> {
-  return withRetry(() => reader.readContract({ address: requireAddress(), functionName, args }), retry);
+  return withRetry(() => withTimeout(reader.readContract({ address: requireAddress(), functionName, args })), retry);
 }
 
 const list = async <T,>(fn: string, retry?: RetryOptions) =>
@@ -87,10 +88,12 @@ export const views = {
   policies: (retry?: RetryOptions) => list<Policy>("list_policies", retry),
   claims: (retry?: RetryOptions) => list<Claim>("list_claims", retry),
   quote: async (providerId: string, coverage: bigint, termDays: number) =>
-    toBig(await read("quote_premium", [providerId, coverage, termDays])),
+    demo.get().active ? demo.quote(providerId, coverage, termDays) : toBig(await read("quote_premium", [providerId, coverage, termDays])),
   claimable: async (address: string) => toBig(await read("claimable_of", [address.toLowerCase()])),
   drill: async (policyId: string, providerId: string, url: string, payload: string) =>
-    typed<DrillResult>(
+    demo.get().active
+      ? demo.drill(policyId, providerId, url, payload)
+      : typed<DrillResult>(
       await withRetry(() =>
         simulator.simulateWriteContract({ address: requireAddress(), functionName: "run_sla_drill", args: [policyId, providerId, url, payload] }),
       ),
@@ -98,9 +101,9 @@ export const views = {
 };
 
 export const chainReads = {
-  balance: (address: `0x${string}`) => withRetry(() => reader.getBalance({ address })),
+  balance: (address: `0x${string}`) => withRetry(() => withTimeout(reader.getBalance({ address }))),
   /** The consensus fee deposit GenLayer requires on every transaction. */
-  feeDeposit: async () => (await withRetry(() => reader.estimateTransactionFees())).feeValue as bigint,
+  feeDeposit: async () => (await withRetry(() => withTimeout(reader.estimateTransactionFees()))).feeValue as bigint,
 };
 
 export type WriteArgs = Arg[];

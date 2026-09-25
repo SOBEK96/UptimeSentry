@@ -48,3 +48,15 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
     }
   }
 }
+
+export const RPC_TIMEOUT_MS = 8_000;
+
+/** Rejects with a transient "timed out" error if the call hasn't settled in
+ * time, so a hung RPC is retried and then reported instead of blocking. */
+export function withTimeout<T>(p: Promise<T>, ms = RPC_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`RPC request timed out after ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}

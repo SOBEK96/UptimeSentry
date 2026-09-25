@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DrillResult, Policy, Provider } from "../lib/types";
 import { views } from "../lib/contract";
+import { demo } from "../lib/demo";
 import { explainError } from "../lib/errors";
 import { probeFromBrowser } from "../lib/browserProbe";
 import { formatDuration, formatGen, shortAddr } from "../lib/format";
@@ -28,15 +29,24 @@ const VERDICT: Record<DrillResult["verdict"], { kind: Line["kind"]; text: string
 
 const stamp = () => new Date().toISOString().slice(11, 19);
 
-export function Drill({ policies, providers }: { policies: Policy[]; providers: Provider[] }) {
+export function Drill({ policies, providers, onExplore }: { policies: Policy[]; providers: Provider[]; onExplore?: () => void }) {
   const [providerId, setProviderId] = useState(providers[0]?.provider_id ?? "");
   const provider = providers.find((p) => p.provider_id === providerId) ?? providers[0];
-  if (!provider) return <Empty title="Register an endpoint to run diagnostics against it." />;
+  if (!provider)
+    return (
+      <Empty title="Register an endpoint to run diagnostics against it.">
+        {onExplore && (
+          <Button variant="ghost" onClick={onExplore}>
+            Try the drill on sample endpoints
+          </Button>
+        )}
+      </Empty>
+    );
   return <DrillConsole key={provider.provider_id} provider={provider} providers={providers} policies={policies.filter((p) => p.provider_id === provider.provider_id)} onProvider={setProviderId} />;
 }
 
 function DrillConsole({ provider, providers, policies, onProvider }: { provider: Provider; providers: Provider[]; policies: Policy[]; onProvider: (id: string) => void }) {
-  const [policyId, setPolicyId] = useState(policies[0]?.policy_id ?? "");
+  const [policyId, setPolicyId] = useState((policies.find((p) => p.status === "ACTIVE") ?? policies[0])?.policy_id ?? "");
   const [url, setUrl] = useState(provider.endpoint_url);
   const [payload, setPayload] = useState(provider.probe_payload);
   const [lines, setLines] = useState<Line[]>([{ t: stamp(), kind: "note", text: "# ready. choose a check below." }]);
@@ -67,7 +77,12 @@ function DrillConsole({ provider, providers, policies, onProvider }: { provider:
     setRunning(true);
     log("cmd", `$ run_sla_drill --policy ${policy.policy_id} --target ${url}`);
     log(bound ? "ok" : "warn", bound ? "✓ binding: endpoint and payload match the registered target" : "! binding: target differs from registration; expect rejection");
-    log("info", "… simulating on a GenLayer node: the probe runs inside GenVM, nothing is committed");
+    log(
+      "info",
+      demo.get().active
+        ? "… guest mode: evaluating in your browser with the contract's rules (sample telemetry), nothing is committed"
+        : "… simulating on a GenLayer node: the probe runs inside GenVM, nothing is committed",
+    );
     try {
       const r = await views.drill(policy.policy_id, provider.provider_id, url, payload);
       if (r.bound) log(r.observed_up ? "ok" : "err", `← GenVM probe response: ${r.code}`);

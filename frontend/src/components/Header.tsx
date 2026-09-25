@@ -2,40 +2,47 @@ import { useEffect, useState } from "react";
 import type { SyncState } from "../lib/useSnapshot";
 import type { Wallet } from "../lib/wallet";
 import { CONTRACT_ADDRESS, EXPLORER_URL, NETWORK_LABEL } from "../lib/network";
-import { formatGen, shortAddr } from "../lib/format";
+import { ago, formatGen, shortAddr } from "../lib/format";
+import { DEMO_ACCOUNT, type DemoReason } from "../lib/demo";
 import { Badge, Button, Dot, Mono } from "./ui";
 import { cx } from "./styles";
 
-function ago(ms: number): string {
-  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  return s < 5 ? "just now" : s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`;
-}
-
-export function SyncIndicator({ sync, onRetry }: { sync: SyncState; onRetry: () => void }) {
+export function SyncIndicator({ sync, onRetry, demo }: { sync: SyncState; onRetry: () => void; demo: DemoReason | null }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 5000);
     return () => clearInterval(t);
   }, []);
+  if (demo === "guest") return <Badge tone="sky" dot>Sample telemetry</Badge>;
   if (sync.kind === "loading") return <Badge tone="zinc" dot pulse>Syncing contract…</Badge>;
   if (sync.kind === "live") return <Badge tone="emerald" dot>Synced {ago(sync.at)}</Badge>;
   const why = sync.reason === "busy" ? "RPC busy" : "RPC unreachable";
   if (sync.kind === "retrying")
     return (
       <Badge tone="amber" dot pulse>
-        {why} · retrying{sync.lastAt ? ` · showing ${ago(sync.lastAt)}` : ""}
+        {why} · retrying{demo ? " · showing sample telemetry" : sync.lastAt ? ` · showing ${ago(sync.lastAt)}` : ""}
       </Badge>
     );
   return (
     <button onClick={onRetry} className="rounded-full" title="Retry now">
       <Badge tone="amber" dot className="hover:bg-amber-500/20">
-        {why} · {sync.lastAt ? `showing data from ${ago(sync.lastAt)}` : "no data yet"} · retry
+        {why} · {demo ? "showing sample telemetry" : sync.lastAt ? `showing data from ${ago(sync.lastAt)}` : "no data yet"} · retry
       </Badge>
     </button>
   );
 }
 
-export function Header({ wallet, balance, sync, onRetry }: { wallet: Wallet; balance: bigint | null; sync: SyncState; onRetry: () => void }) {
+interface HeaderProps {
+  wallet: Wallet;
+  balance: bigint | null;
+  sync: SyncState;
+  onRetry: () => void;
+  demo: DemoReason | null;
+  onGuest: () => void;
+  onExitGuest: () => void;
+}
+
+export function Header({ wallet, balance, sync, onRetry, demo, onGuest, onExitGuest }: HeaderProps) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 py-5">
       <div className="flex items-center gap-3">
@@ -61,19 +68,38 @@ export function Header({ wallet, balance, sync, onRetry }: { wallet: Wallet; bal
           {NETWORK_LABEL}
           {CONTRACT_ADDRESS && <Mono className="text-zinc-500">{shortAddr(CONTRACT_ADDRESS)}</Mono>}
         </a>
-        <SyncIndicator sync={sync} onRetry={onRetry} />
-        <WalletBadge wallet={wallet} balance={balance} />
+        <SyncIndicator sync={sync} onRetry={onRetry} demo={demo} />
+        {demo ? <GuestBadge balance={balance} onExit={onExitGuest} /> : <WalletBadge wallet={wallet} balance={balance} onGuest={onGuest} />}
       </div>
     </header>
   );
 }
 
-function WalletBadge({ wallet, balance }: { wallet: Wallet; balance: bigint | null }) {
+function GuestBadge({ balance, onExit }: { balance: bigint | null; onExit: () => void }) {
+  return (
+    <span className="inline-flex h-8 items-center gap-2 rounded-full border border-indigo-400/30 bg-indigo-500/10 pl-1 pr-1 text-xs backdrop-blur">
+      <span className="grid size-6 place-items-center rounded-full bg-gradient-to-br from-indigo-400 to-sky-400 text-[10px] font-bold text-zinc-950">G</span>
+      <span className="text-indigo-100">Studio guest</span>
+      <Mono className="text-zinc-400">{shortAddr(DEMO_ACCOUNT)}</Mono>
+      {balance !== null && <Mono className="text-zinc-400">{formatGen(balance, 2)} GEN</Mono>}
+      <button onClick={onExit} className="rounded-full px-2 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100" title="Leave guest mode">
+        exit
+      </button>
+    </span>
+  );
+}
+
+function WalletBadge({ wallet, balance, onGuest }: { wallet: Wallet; balance: bigint | null; onGuest: () => void }) {
   if (!wallet.address)
     return (
-      <Button size="sm" onClick={wallet.connect} disabled={wallet.connecting} className="h-8 rounded-full">
-        {wallet.connecting ? "Connecting…" : "Connect wallet"}
-      </Button>
+      <>
+        <Button size="sm" variant="ghost" onClick={onGuest} className="h-8 rounded-full" title="Explore every feature with sample data and a demo balance. No wallet or funds needed.">
+          Try as Studio guest
+        </Button>
+        <Button size="sm" onClick={wallet.connect} disabled={wallet.connecting} className="h-8 rounded-full">
+          {wallet.connecting ? "Connecting…" : "Connect wallet"}
+        </Button>
+      </>
     );
   if (!wallet.chainOk)
     return (
