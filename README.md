@@ -11,23 +11,13 @@ UptimeSentry is a GenLayer **Intelligent Contract**. It combines four things no 
 - **Advisory LLM triage:** a language model reviews every incident report and records its verdict as evidence, without overruling the validators.
 - **Game-theoretic bonds:** reporters, appellants and providers all put GEN at risk.
 
-## Verified contracts
+## Verified contract
 
-| Deployment | Address | Status |
-| --- | --- | --- |
-| **Studio Next** (chain 61997), current | [`0x4d580Dc355510e170529473906A455f51610F405`](https://explorer-studio-next.genlayer.com/address/0x4d580Dc355510e170529473906A455f51610F405) | Round-2 hardened contract. On-chain source sha256 `a0aea60c…d5656` matches `contracts/uptimesentry.py` byte for byte. Deploy tx [`0x2af0aebd…f16d`](https://explorer-studio-next.genlayer.com/tx/0x2af0aebd25f0fd7af132ef24a902ee683ba48fcf58318bcdec99161cfe95f16d). Record: [`deployments/studio-next.json`](deployments/studio-next.json) |
-| Studio Next, v3 | [`0x23474374a1B493a1fEe91075a932BcaaCbF6013B`](https://explorer-studio-next.genlayer.com/address/0x23474374a1B493a1fEe91075a932BcaaCbF6013B) | Superseded; identical source to the current contract. Record: [`deployments/studio-next.v3.json`](deployments/studio-next.v3.json) |
-| Studio Next, v2 | [`0xd21347E2516532b036Ae00b2152466f73b7b5E7f`](https://explorer-studio-next.genlayer.com/address/0xd21347E2516532b036Ae00b2152466f73b7b5E7f) | Superseded (round-1 hardening). Record: [`deployments/studio-next.v2.json`](deployments/studio-next.v2.json) |
-| Studio Next, v1 | [`0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E`](https://explorer-studio-next.genlayer.com/address/0x4f8D4900Ee3fCe15B9C3f992601139C5C6e70b3E) | Superseded (pre-review). Record: [`deployments/studio-next.v1.json`](deployments/studio-next.v1.json) |
+- **Contract Address:** `0x4d580Dc355510e170529473906A455f51610F405`
+- **Explorer Link:** [`https://explorer-studio-next.genlayer.com/address/0x4d580Dc355510e170529473906A455f51610F405`](https://explorer-studio-next.genlayer.com/address/0x4d580Dc355510e170529473906A455f51610F405)
+- **Network:** GenLayer Studio Next (Chain ID: 61997)
 
-Live activity on v3 (`0x23474374…013B`), which runs the identical source. All calls finalized with `MAJORITY_AGREE` (validator consensus). The current contract is freshly deployed and empty; `scripts/bootstrap_live.py` seeds it the same way.
-
-| Call | Transaction | Result |
-| --- | --- | --- |
-| `register_provider` (`https://mainnet.base.org`, 10 GEN pool) | [`0x5d28adcf…4527`](https://explorer-studio-next.genlayer.com/tx/0x5d28adcfa579a1ced16b70df4b63f8ffa46d9b48afb7030c05f0617fcc524527) | Provider `0xda1e4a0b…7deb` |
-| `purchase_coverage` (1 GEN, 30 days) | [`0x5ed1235e…bc52`](https://explorer-studio-next.genlayer.com/tx/0x5ed1235e72afc93cb7f398452428a675cb6a86aa1bf1c43894c16e70d828bc52) | Policy `…0001` |
-| `attest_probe` | [`0xcd3e6e6d…5d3a`](https://explorer-studio-next.genlayer.com/tx/0xcd3e6e6d24d6c2bec70c90a667bbfa76b5d6eec8a3b7215e3d80f8895d9f5d3a) | Validators agreed: `UP` |
-| `run_sla_drill` (write simulation) | none (not committed) | `REJECTED_TARGET_HEALTHY`, live probe `UP` |
+Round-2 hardened contract. On-chain source sha256 `a0aea60c…d5656` matches `contracts/uptimesentry.py` byte for byte. Deploy tx [`0x2af0aebd…f16d`](https://explorer-studio-next.genlayer.com/tx/0x2af0aebd25f0fd7af132ef24a902ee683ba48fcf58318bcdec99161cfe95f16d). Record: [`deployments/studio-next.json`](deployments/studio-next.json). `scripts/bootstrap_live.py` seeds it with a live provider, policy, probe and drill.
 
 ## Repository
 
